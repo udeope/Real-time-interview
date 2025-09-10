@@ -2,20 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { TranscriptionPanel } from '@/components/transcription/TranscriptionPanel';
-import { ResponseSuggestionsPanel } from '@/components/responses/ResponseSuggestionsPanel';
-import { ContextPanel } from '@/components/context/ContextPanel';
-import { AudioCapturePanel } from '@/components/AudioCapturePanel';
-import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { InterviewSession } from '@/components/interview/InterviewSession';
 import { 
-  TranscriptionData, 
-  ResponseOption, 
   JobContext, 
   UserProfile, 
   ProcessingStatus 
 } from '@/types/ui.types';
-import { Play, Square, Pause } from 'lucide-react';
 
 // Mock data - replace with actual API calls
 const mockUser = {
@@ -62,9 +54,6 @@ const mockUserProfile: UserProfile = {
 };
 
 export default function InterviewPage() {
-  const [sessionActive, setSessionActive] = useState(false);
-  const [transcriptions, setTranscriptions] = useState<TranscriptionData[]>([]);
-  const [responses, setResponses] = useState<ResponseOption[]>([]);
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>({
     isListening: false,
     isTranscribing: false,
@@ -72,63 +61,25 @@ export default function InterviewPage() {
     lastUpdate: new Date()
   });
 
-  // Mock transcription data for demonstration
+  // Get auth token from localStorage or context
+  const [authToken, setAuthToken] = useState<string>('');
+  
   useEffect(() => {
-    if (sessionActive) {
-      const mockTranscription: TranscriptionData = {
-        id: Date.now().toString(),
-        text: "Tell me about your experience with React and how you've used it in previous projects.",
-        confidence: 0.95,
-        isFinal: true,
-        timestamp: Date.now(),
-        speakerId: 'interviewer'
-      };
-
-      const mockResponses: ResponseOption[] = [
-        {
-          id: '1',
-          content: "I have over 3 years of experience with React, where I've built several production applications. In my previous role at Previous Corp, I led the frontend development of a customer dashboard that served over 10,000 users. I implemented complex state management using Redux, created reusable component libraries, and optimized performance through code splitting and lazy loading, which improved our initial load time by 40%.",
-          structure: 'STAR',
-          estimatedDuration: 75,
-          confidence: 0.92,
-          tags: ['React', 'Performance', 'Leadership']
-        },
-        {
-          id: '2',
-          content: "I've been working with React for 3+ years, focusing on building scalable web applications. My experience includes component architecture, state management with Redux and Context API, and performance optimization. I'm particularly experienced with React hooks, testing with Jest and React Testing Library, and integrating with REST APIs.",
-          structure: 'technical',
-          estimatedDuration: 60,
-          confidence: 0.88,
-          tags: ['React', 'Testing', 'APIs']
-        }
-      ];
-
-      // Simulate adding transcription after a delay
-      setTimeout(() => {
-        setTranscriptions([mockTranscription]);
-        setProcessingStatus(prev => ({ ...prev, isTranscribing: false, isGeneratingResponse: true }));
-        
-        // Simulate response generation
-        setTimeout(() => {
-          setResponses(mockResponses);
-          setProcessingStatus(prev => ({ ...prev, isGeneratingResponse: false }));
-        }, 2000);
-      }, 1000);
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      setAuthToken(token);
+    } else {
+      // Redirect to login if no token
+      window.location.href = '/login';
     }
-  }, [sessionActive]);
+  }, []);
 
-  const handleStartSession = () => {
-    setSessionActive(true);
-    setProcessingStatus(prev => ({ 
-      ...prev, 
-      isListening: true, 
-      isTranscribing: true,
-      lastUpdate: new Date() 
-    }));
+  const handleLogout = () => {
+    localStorage.removeItem('authToken');
+    window.location.href = '/login';
   };
 
-  const handleStopSession = () => {
-    setSessionActive(false);
+  const handleSessionEnd = () => {
     setProcessingStatus({
       isListening: false,
       isTranscribing: false,
@@ -137,22 +88,17 @@ export default function InterviewPage() {
     });
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('authToken');
-    window.location.href = '/login';
-  };
-
-  const handleCopyResponse = (response: ResponseOption) => {
-    console.log('Copied response:', response.id);
-  };
-
-  const handleEditResponse = (response: ResponseOption) => {
-    console.log('Edit response:', response.id);
-  };
-
-  const handleSelectResponse = (response: ResponseOption) => {
-    console.log('Selected response:', response.id);
-  };
+  // Don't render if no auth token
+  if (!authToken) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <MainLayout
@@ -160,82 +106,13 @@ export default function InterviewPage() {
       processingStatus={processingStatus}
       onLogout={handleLogout}
     >
-      <div className="space-y-6">
-        {/* Session Controls */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Interview Session</span>
-              <div className="flex items-center space-x-2">
-                {!sessionActive ? (
-                  <Button onClick={handleStartSession} className="flex items-center space-x-2">
-                    <Play className="h-4 w-4" />
-                    <span>Start Session</span>
-                  </Button>
-                ) : (
-                  <Button 
-                    onClick={handleStopSession} 
-                    variant="destructive"
-                    className="flex items-center space-x-2"
-                  >
-                    <Square className="h-4 w-4" />
-                    <span>Stop Session</span>
-                  </Button>
-                )}
-              </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AudioCapturePanel />
-          </CardContent>
-        </Card>
-
-        {/* Main Interview Interface */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Transcription */}
-          <div className="lg:col-span-1">
-            <TranscriptionPanel
-              transcriptions={transcriptions}
-              isActive={sessionActive}
-              className="h-[600px]"
-            />
-          </div>
-
-          {/* Middle Column - Response Suggestions */}
-          <div className="lg:col-span-1">
-            <ResponseSuggestionsPanel
-              responses={responses}
-              isGenerating={processingStatus.isGeneratingResponse}
-              onCopyResponse={handleCopyResponse}
-              onEditResponse={handleEditResponse}
-              onSelectResponse={handleSelectResponse}
-              className="h-[600px]"
-            />
-          </div>
-
-          {/* Right Column - Context */}
-          <div className="lg:col-span-1">
-            <ContextPanel
-              jobContext={mockJobContext}
-              userProfile={mockUserProfile}
-              className="h-[600px] overflow-y-auto"
-            />
-          </div>
-        </div>
-
-        {/* Session Info */}
-        {sessionActive && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between text-sm text-gray-600">
-                <span>Session Duration: 00:05:23</span>
-                <span>Questions Answered: 1</span>
-                <span>Avg Response Time: 2.3s</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      <InterviewSession
+        sessionId={`session-${Date.now()}`} // Generate or get from URL params
+        jobContext={mockJobContext}
+        userProfile={mockUserProfile}
+        authToken={authToken}
+        onSessionEnd={handleSessionEnd}
+      />
     </MainLayout>
   );
 }
