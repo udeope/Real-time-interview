@@ -11,6 +11,7 @@ import { InterviewSessionModule } from './modules/interview-session/interview-se
 import { WebSocketModule } from './modules/websocket/websocket.module';
 import { TranscriptionModule } from './modules/transcription/transcription.module';
 import { ContextAnalysisModule } from './modules/context-analysis/context-analysis.module';
+import { ResponseGenerationModule } from './modules/response-generation/response-generation.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { validateEnvironment } from './config/env.validation';
 
@@ -34,6 +35,7 @@ import { validateEnvironment } from './config/env.validation';
     WebSocketModule,
     TranscriptionModule,
     ContextAnalysisModule,
+    ResponseGenerationModule,
   ],
   controllers: [AppController],
   providers: [
