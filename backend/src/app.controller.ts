@@ -2,8 +2,10 @@ import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
 import { DatabaseService } from './config/database.config';
 import { RedisService } from './config/redis.config';
+import { Public } from './modules/auth/decorators/public.decorator';
 
 @Controller()
+@Public()
 export class AppController {
   constructor(
     private readonly appService: AppService,

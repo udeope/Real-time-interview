@@ -14,6 +14,7 @@ model User {
   id               String   @id @default(cuid())
   email            String   @unique
   name             String
+  password         String
   subscriptionTier String   @default("free") @map("subscription_tier")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
