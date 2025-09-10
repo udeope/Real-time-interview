@@ -1,0 +1,88 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  name             String
+  subscriptionTier String   @default("free") @map("subscription_tier")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  profile          UserProfile?
+  sessions         InterviewSession[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  seniority   String?
+  industries  Json?
+  skills      Json?
+  experience  Json?
+  preferences Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+model InterviewSession {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  jobContext Json?     @map("job_context")
+  status     String    @default("active")
+  settings   Json?
+  startedAt  DateTime  @default(now()) @map("started_at")
+  endedAt    DateTime? @map("ended_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interactions Interaction[]
+  metrics      SessionMetrics[]
+
+  @@map("interview_sessions")
+}
+
+model Interaction {
+  id                     String   @id @default(cuid())
+  sessionId              String   @map("session_id")
+  question               String
+  questionClassification Json?    @map("question_classification")
+  generatedResponses     Json?    @map("generated_responses")
+  selectedResponse       String?  @map("selected_response")
+  userFeedback          Int?     @map("user_feedback")
+  timestamp              DateTime @default(now())
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("interactions")
+}
+
+model SessionMetrics {
+  id                      String   @id @default(cuid())
+  sessionId               String   @map("session_id")
+  transcriptionLatencyMs  Int?     @map("transcription_latency_ms")
+  responseGenerationMs    Int?     @map("response_generation_ms")
+  totalLatencyMs          Int?     @map("total_latency_ms")
+  transcriptionAccuracy   Decimal? @map("transcription_accuracy") @db.Decimal(5, 2)
+  userSatisfaction        Int?     @map("user_satisfaction")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("session_metrics")
+}
