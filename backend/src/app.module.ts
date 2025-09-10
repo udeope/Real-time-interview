@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { InterviewSessionModule } from './modules/interview-session/interview-session.module';
 import { WebSocketModule } from './modules/websocket/websocket.module';
+import { TranscriptionModule } from './modules/transcription/transcription.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { validateEnvironment } from './config/env.validation';
 
@@ -30,6 +31,7 @@ import { validateEnvironment } from './config/env.validation';
     UserModule,
     InterviewSessionModule,
     WebSocketModule,
+    TranscriptionModule,
   ],
   controllers: [AppController],
   providers: [

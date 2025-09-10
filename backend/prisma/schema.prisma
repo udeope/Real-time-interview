@@ -51,9 +51,11 @@ model InterviewSession {
   endedAt    DateTime? @map("ended_at")
   createdAt  DateTime  @default(now()) @map("created_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  interactions Interaction[]
-  metrics      SessionMetrics[]
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interactions         Interaction[]
+  metrics              SessionMetrics[]
+  transcriptionResults TranscriptionResult[]
+  audioChunks          AudioChunk[]
 
   @@map("interview_sessions")
 }
@@ -68,7 +70,8 @@ model Interaction {
   userFeedback          Int?     @map("user_feedback")
   timestamp              DateTime @default(now())
 
-  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session              InterviewSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  transcriptionResults TranscriptionResult[]
 
   @@map("interactions")
 }
@@ -86,4 +89,67 @@ model SessionMetrics {
   session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("session_metrics")
+}
+
+model TranscriptionResult {
+  id                String   @id @default(cuid())
+  sessionId         String   @map("session_id")
+  interactionId     String?  @map("interaction_id")
+  audioChunkId      String   @map("audio_chunk_id")
+  text              String
+  confidence        Decimal  @db.Decimal(5, 4)
+  isFinal           Boolean  @default(false) @map("is_final")
+  provider          String   // 'google' | 'whisper'
+  language          String   @default("en-US")
+  speakerId         String?  @map("speaker_id")
+  startTime         Decimal? @map("start_time") @db.Decimal(10, 3)
+  endTime           Decimal? @map("end_time") @db.Decimal(10, 3)
+  alternatives      Json?    // Alternative transcriptions
+  metadata          Json?    // Additional provider-specific data
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  session     InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  interaction Interaction?     @relation(fields: [interactionId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt])
+  @@index([audioChunkId])
+  @@map("transcription_results")
+}
+
+model AudioChunk {
+  id            String   @id @default(cuid())
+  sessionId     String   @map("session_id")
+  chunkIndex    Int      @map("chunk_index")
+  audioData     Bytes?   @map("audio_data") // Store small chunks temporarily
+  audioUrl      String?  @map("audio_url")  // URL for larger files
+  format        String   @default("webm")
+  sampleRate    Int      @default(16000) @map("sample_rate")
+  channels      Int      @default(1)
+  duration      Decimal? @db.Decimal(10, 3)
+  size          Int?     // Size in bytes
+  checksum      String?  // For integrity verification
+  processedAt   DateTime? @map("processed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, chunkIndex])
+  @@map("audio_chunks")
+}
+
+model TranscriptionCache {
+  id          String   @id @default(cuid())
+  audioHash   String   @unique @map("audio_hash") // Hash of audio content
+  text        String
+  confidence  Decimal  @db.Decimal(5, 4)
+  provider    String
+  language    String   @default("en-US")
+  metadata    Json?
+  hitCount    Int      @default(1) @map("hit_count")
+  lastUsed    DateTime @default(now()) @map("last_used")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([audioHash])
+  @@index([lastUsed])
+  @@map("transcription_cache")
 }
