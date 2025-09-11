@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-interview-prod
+  labels:
+    name: ai-interview-prod
+    environment: production
