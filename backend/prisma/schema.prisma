@@ -33,6 +33,9 @@ model User {
   webhookEndpoints   WebhookEndpoint[]
   calendarEvents     CalendarEvent[]
   videoMeetings      VideoMeeting[]
+  performanceMetrics PerformanceMetrics[]
+  satisfactionMetrics UserSatisfactionMetrics[]
+  usageAnalytics     UsageAnalytics[]
 
   @@map("users")
 }
@@ -69,6 +72,9 @@ model InterviewSession {
   transcriptionResults TranscriptionResult[]
   audioChunks          AudioChunk[]
   auditLogs            AuditLog[]
+  performanceMetrics   PerformanceMetrics[]
+  satisfactionMetrics  UserSatisfactionMetrics[]
+  usageAnalytics       UsageAnalytics[]
 
   @@map("interview_sessions")
 }
@@ -405,8 +411,8 @@ model PrivacySetting {
 
   @@map("privacy_settings")
 }
-// 
-External Integrations Models
+
+// External Integrations Models
 
 enum IntegrationType {
   LINKEDIN
@@ -592,4 +598,94 @@ model VideoMeeting {
   @@index([startTime])
   @@index([isInterviewRelated])
   @@map("video_meetings")
+}
+
+// Monitoring and Analytics Models
+model PerformanceMetrics {
+  id                        String   @id @default(cuid())
+  sessionId                 String   @map("session_id")
+  userId                    String   @map("user_id")
+  transcriptionLatency      Int      @map("transcription_latency")
+  responseGenerationLatency Int      @map("response_generation_latency")
+  totalLatency              Int      @map("total_latency")
+  timestamp                 DateTime @default(now())
+  createdAt                 DateTime @default(now()) @map("created_at")
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([timestamp])
+  @@map("performance_metrics")
+}
+
+model AccuracyMetrics {
+  id               String   @id @default(cuid())
+  transcriptionId  String   @map("transcription_id")
+  wordErrorRate    Float    @map("word_error_rate")
+  confidenceScore  Float    @map("confidence_score")
+  actualText       String?  @map("actual_text")
+  transcribedText  String   @map("transcribed_text")
+  timestamp        DateTime @default(now())
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([transcriptionId])
+  @@index([timestamp])
+  @@map("accuracy_metrics")
+}
+
+model UserSatisfactionMetrics {
+  id          String   @id @default(cuid())
+  sessionId   String   @map("session_id")
+  userId      String   @map("user_id")
+  rating      Int
+  feedback    String?
+  featureUsed String   @map("feature_used")
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([featureUsed])
+  @@index([timestamp])
+  @@map("user_satisfaction_metrics")
+}
+
+model UsageAnalytics {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  sessionId String   @map("session_id")
+  feature   String
+  action    String
+  duration  Int?
+  metadata  Json?
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([feature])
+  @@index([timestamp])
+  @@map("usage_analytics")
+}
+
+model SystemHealthMetrics {
+  id                String   @id @default(cuid())
+  cpuUsage          Float    @map("cpu_usage")
+  memoryUsage       Float    @map("memory_usage")
+  activeConnections Int      @map("active_connections")
+  queueSize         Int      @map("queue_size")
+  errorRate         Float    @map("error_rate")
+  timestamp         DateTime @default(now())
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([timestamp])
+  @@map("system_health_metrics")
 }

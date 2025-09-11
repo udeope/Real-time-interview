@@ -1,0 +1,92 @@
+groups:
+  - name: ai_interview_assistant_alerts
+    rules:
+      # High latency alert
+      - alert: HighLatency
+        expr: avg(performance_metrics_total_latency) > 2000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High response latency detected"
+          description: "Average response latency is {{ $value }}ms, which exceeds the 2000ms threshold"
+
+      # Low accuracy alert
+      - alert: LowAccuracy
+        expr: avg(1 - accuracy_metrics_word_error_rate) * 100 < 95
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Transcription accuracy below threshold"
+          description: "Average transcription accuracy is {{ $value }}%, which is below the 95% threshold"
+
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: system_health_metrics_cpu_usage > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}%, which exceeds the 80% threshold"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: system_health_metrics_memory_usage > 85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}%, which exceeds the 85% threshold"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: system_health_metrics_error_rate > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }}%, which exceeds the 5% threshold"
+
+      # Low user satisfaction
+      - alert: LowUserSatisfaction
+        expr: avg(user_satisfaction_metrics_rating) < 3.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low user satisfaction detected"
+          description: "Average user satisfaction is {{ $value }}/5, which is below the 3.5 threshold"
+
+      # Service down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service is down"
+          description: "{{ $labels.job }} service is not responding"
+
+      # Database connection issues
+      - alert: DatabaseConnectionIssues
+        expr: increase(database_connection_errors_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connection issues detected"
+          description: "{{ $value }} database connection errors in the last 5 minutes"
+
+      # Queue size growing
+      - alert: QueueSizeGrowing
+        expr: system_health_metrics_queue_size > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue size is growing"
+          description: "Queue size is {{ $value }}, which may indicate processing delays"

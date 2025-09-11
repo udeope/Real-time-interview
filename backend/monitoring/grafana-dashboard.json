@@ -1,0 +1,211 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "AI Interview Assistant - System Monitoring",
+    "tags": ["ai-interview", "monitoring", "performance"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Health Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "system_health_status",
+            "legendFormat": "System Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 2}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Response Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg(performance_metrics_total_latency)",
+            "legendFormat": "Average Latency"
+          },
+          {
+            "expr": "max(performance_metrics_total_latency)",
+            "legendFormat": "Max Latency"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Milliseconds",
+            "min": 0
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 2000,
+            "colorMode": "critical",
+            "op": "gt"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Transcription Accuracy",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg(1 - accuracy_metrics_word_error_rate) * 100",
+            "legendFormat": "Accuracy %"
+          },
+          {
+            "expr": "avg(accuracy_metrics_confidence_score) * 100",
+            "legendFormat": "Confidence %"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Percentage",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 95,
+            "colorMode": "critical",
+            "op": "lt"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "User Satisfaction",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg(user_satisfaction_metrics_rating)",
+            "legendFormat": "Average Rating"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Rating (1-5)",
+            "min": 1,
+            "max": 5
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 3.5,
+            "colorMode": "critical",
+            "op": "lt"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "system_health_metrics_cpu_usage",
+            "legendFormat": "CPU Usage %"
+          },
+          {
+            "expr": "system_health_metrics_memory_usage",
+            "legendFormat": "Memory Usage %"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Percentage",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 80,
+            "colorMode": "critical",
+            "op": "gt"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Active Users & Sessions",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "count(distinct(usage_analytics_user_id))",
+            "legendFormat": "Active Users"
+          },
+          {
+            "expr": "count(usage_analytics_session_id)",
+            "legendFormat": "Total Sessions"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "system_health_metrics_error_rate",
+            "legendFormat": "Error Rate %"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Percentage",
+            "min": 0
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 5,
+            "colorMode": "critical",
+            "op": "gt"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 8,
+        "title": "Feature Usage",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "count by (feature) (usage_analytics_feature)",
+            "legendFormat": "{{feature}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}
