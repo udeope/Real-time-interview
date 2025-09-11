@@ -196,6 +196,34 @@ Always respond with a JSON object containing a "responses" array with the follow
       : 'balanced';
   }
 
+  /**
+   * Generate a custom response for any prompt (used for practice feedback)
+   */
+  async generateCustomResponse(prompt: string): Promise<string> {
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert interview coach providing detailed, constructive feedback.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+
+      return completion.choices[0]?.message?.content || 'Unable to generate response';
+    } catch (error) {
+      this.logger.error('OpenAI API error in generateCustomResponse:', error);
+      throw new Error('Failed to generate custom response');
+    }
+  }
+
   private getFallbackResponses(question: string, context: PersonalizationContext): ResponseOption[] {
     // Provide basic fallback responses when OpenAI is not available
     const fallbackContent = `I'd approach this question by drawing from my experience in ${context.userProfile.industries[0] || 'the industry'}. Based on my background as a ${context.userProfile.seniority} professional, I would focus on demonstrating my relevant skills and experience that align with the ${context.jobContext.title} role.`;

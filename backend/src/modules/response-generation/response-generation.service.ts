@@ -138,6 +138,23 @@ export class ResponseGenerationService {
     return this.cacheService.clearCache(pattern);
   }
 
+  /**
+   * Generate a custom response using OpenAI for practice feedback
+   */
+  async generateCustomResponse(prompt: string): Promise<string> {
+    try {
+      this.logger.log('Generating custom response for practice feedback');
+      
+      // Use OpenAI service to generate response
+      const response = await this.openaiService.generateCustomResponse(prompt);
+      
+      return response;
+    } catch (error) {
+      this.logger.error('Error generating custom response:', error);
+      throw error;
+    }
+  }
+
   private async generateNewResponses(request: ResponseGenerationRequest): Promise<ResponseOption[]> {
     const { question, context, options = {} } = request;
     

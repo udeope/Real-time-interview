@@ -21,6 +21,7 @@ model User {
 
   profile          UserProfile?
   sessions         InterviewSession[]
+  practiceSessions PracticeSession[]
 
   @@map("users")
 }
@@ -152,4 +153,109 @@ model TranscriptionCache {
   @@index([audioHash])
   @@index([lastUsed])
   @@map("transcription_cache")
+}
+
+model PracticeSession {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  jobTitle        String    @map("job_title")
+  industry        String
+  difficulty      String    // 'junior' | 'mid' | 'senior'
+  questionTypes   Json      @map("question_types") // Array of question types
+  questionCount   Int       @map("question_count")
+  status          String    @default("active") // 'active' | 'completed' | 'abandoned'
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  duration        Int?      // Duration in minutes
+  averageScore    Decimal?  @map("average_score") @db.Decimal(4, 2)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions         PracticeQuestion[]
+  responses         PracticeResponse[]
+  analytics         PracticeAnalytics[]
+
+  @@index([userId, createdAt])
+  @@map("practice_sessions")
+}
+
+model QuestionBank {
+  id              String   @id @default(cuid())
+  question        String
+  type            String   // 'technical' | 'behavioral' | 'situational' | 'cultural'
+  category        String
+  industry        String
+  difficulty      String   // 'junior' | 'mid' | 'senior'
+  expectedStructure String? @map("expected_structure")
+  keyPoints       Json?    @map("key_points") // Array of key points
+  timeLimit       Int?     @map("time_limit") // Time limit in seconds
+  tags            Json?    // Array of tags
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  practiceQuestions PracticeQuestion[]
+
+  @@index([type, industry, difficulty])
+  @@index([category, isActive])
+  @@map("question_bank")
+}
+
+model PracticeQuestion {
+  id              String   @id @default(cuid())
+  sessionId       String   @map("session_id")
+  questionBankId  String   @map("question_bank_id")
+  questionOrder   Int      @map("question_order")
+  presentedAt     DateTime @default(now()) @map("presented_at")
+  answeredAt      DateTime? @map("answered_at")
+
+  session       PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionBank  QuestionBank    @relation(fields: [questionBankId], references: [id])
+  response      PracticeResponse?
+
+  @@index([sessionId, questionOrder])
+  @@map("practice_questions")
+}
+
+model PracticeResponse {
+  id                  String   @id @default(cuid())
+  sessionId           String   @map("session_id")
+  questionId          String   @unique @map("question_id")
+  response            String
+  duration            Int      // Duration in seconds
+  usedAISuggestions   Boolean  @default(false) @map("used_ai_suggestions")
+  overallScore        Decimal? @map("overall_score") @db.Decimal(4, 2)
+  contentScore        Decimal? @map("content_score") @db.Decimal(4, 2)
+  structureScore      Decimal? @map("structure_score") @db.Decimal(4, 2)
+  clarityScore        Decimal? @map("clarity_score") @db.Decimal(4, 2)
+  feedback            String?
+  strengths           Json?    // Array of strengths
+  improvements        Json?    // Array of improvements
+  suggestions         Json?    // Array of suggestions
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  session   PracticeSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question  PracticeQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("practice_responses")
+}
+
+model PracticeAnalytics {
+  id                    String   @id @default(cuid())
+  sessionId             String   @map("session_id")
+  userId                String   @map("user_id")
+  totalQuestions        Int      @map("total_questions")
+  questionsAnswered     Int      @map("questions_answered")
+  averageResponseTime   Int?     @map("average_response_time") // In seconds
+  averageScore          Decimal? @map("average_score") @db.Decimal(4, 2)
+  strongestAreas        Json?    @map("strongest_areas") // Array of areas
+  improvementAreas      Json?    @map("improvement_areas") // Array of areas
+  progressMetrics       Json?    @map("progress_metrics") // Custom metrics
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  session PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("practice_analytics")
 }

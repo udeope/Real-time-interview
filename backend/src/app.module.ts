@@ -12,6 +12,7 @@ import { WebSocketModule } from './modules/websocket/websocket.module';
 import { TranscriptionModule } from './modules/transcription/transcription.module';
 import { ContextAnalysisModule } from './modules/context-analysis/context-analysis.module';
 import { ResponseGenerationModule } from './modules/response-generation/response-generation.module';
+import { PracticeModule } from './modules/practice/practice.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { validateEnvironment } from './config/env.validation';
 
@@ -36,6 +37,7 @@ import { validateEnvironment } from './config/env.validation';
     TranscriptionModule,
     ContextAnalysisModule,
     ResponseGenerationModule,
+    PracticeModule,
   ],
   controllers: [AppController],
   providers: [

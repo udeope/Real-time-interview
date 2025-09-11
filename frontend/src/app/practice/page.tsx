@@ -1,305 +1,384 @@
 'use client';
 
-import { useState } from 'react';
-import { MainLayout } from '@/components/layout/MainLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { 
-  Play, 
-  RotateCcw, 
-  Clock, 
-  Target, 
-  BookOpen,
-  ChevronRight,
-  Star
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import PracticeSetup from '../../components/practice/PracticeSetup';
+import PracticeQuestion from '../../components/practice/PracticeQuestion';
+import PracticeFeedback from '../../components/practice/PracticeFeedback';
+import PracticeSessionSummary from '../../components/practice/PracticeSessionSummary';
+import PracticeHistory from '../../components/practice/PracticeHistory';
 
-// Mock data
-const mockUser = {
-  name: 'John Doe',
-  email: 'john.doe@example.com'
-};
+type PracticeMode = 'setup' | 'question' | 'feedback' | 'summary' | 'history';
 
-const mockQuestionCategories = [
-  {
-    id: 'behavioral',
-    name: 'Behavioral Questions',
-    description: 'Questions about your past experiences and how you handle situations',
-    count: 25,
-    difficulty: 'Mixed',
-    color: 'bg-blue-50 text-blue-700 border-blue-200'
-  },
-  {
-    id: 'technical',
-    name: 'Technical Questions',
-    description: 'Questions about your technical skills and problem-solving abilities',
-    count: 30,
-    difficulty: 'Advanced',
-    color: 'bg-purple-50 text-purple-700 border-purple-200'
-  },
-  {
-    id: 'situational',
-    name: 'Situational Questions',
-    description: 'Hypothetical scenarios to assess your decision-making skills',
-    count: 20,
-    difficulty: 'Intermediate',
-    color: 'bg-green-50 text-green-700 border-green-200'
-  },
-  {
-    id: 'cultural',
-    name: 'Cultural Fit',
-    description: 'Questions about company values and team collaboration',
-    count: 15,
-    difficulty: 'Easy',
-    color: 'bg-orange-50 text-orange-700 border-orange-200'
-  }
-];
+interface PracticeSession {
+  id: string;
+  questions: any[];
+  currentQuestionIndex: number;
+  responses: any[];
+}
 
-const mockPracticeHistory = [
-  {
-    id: '1',
-    category: 'Behavioral',
-    score: 88,
-    questionsAnswered: 5,
-    duration: 25,
-    date: '2024-01-15'
-  },
-  {
-    id: '2',
-    category: 'Technical',
-    score: 92,
-    questionsAnswered: 3,
-    duration: 18,
-    date: '2024-01-12'
-  },
-  {
-    id: '3',
-    category: 'Situational',
-    score: 79,
-    questionsAnswered: 4,
-    duration: 22,
-    date: '2024-01-10'
-  }
-];
+interface PracticeConfig {
+  jobTitle: string;
+  industry: string;
+  difficulty: 'junior' | 'mid' | 'senior';
+  questionTypes: string[];
+  questionCount: number;
+  duration?: number;
+}
 
 export default function PracticePage() {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [practiceActive, setPracticeActive] = useState(false);
+  const [mode, setMode] = useState<PracticeMode>('setup');
+  const [session, setSession] = useState<PracticeSession | null>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<any>(null);
+  const [lastFeedback, setLastFeedback] = useState<any>(null);
+  const [sessionSummary, setSessionSummary] = useState<any>(null);
+  const [practiceHistory, setPracticeHistory] = useState<any[]>([]);
+  const [userStats, setUserStats] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogout = () => {
-    localStorage.removeItem('authToken');
-    window.location.href = '/login';
-  };
+  // Load practice history on component mount
+  useEffect(() => {
+    loadPracticeHistory();
+    loadUserStats();
+  }, []);
 
-  const handleStartPractice = (categoryId: string) => {
-    setSelectedCategory(categoryId);
-    setPracticeActive(true);
-  };
-
-  const handleStopPractice = () => {
-    setPracticeActive(false);
-    setSelectedCategory(null);
-  };
-
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty.toLowerCase()) {
-      case 'easy':
-        return 'bg-green-100 text-green-800';
-      case 'intermediate':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'advanced':
-        return 'bg-red-100 text-red-800';
-      case 'mixed':
-        return 'bg-blue-100 text-blue-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
+  const loadPracticeHistory = async () => {
+    try {
+      // This would be an API call to fetch user's practice history
+      // For now, using mock data
+      const mockHistory = [
+        {
+          id: '1',
+          jobTitle: 'Software Engineer',
+          industry: 'Software Engineering',
+          questionsAnswered: 5,
+          averageScore: 7.8,
+          duration: 25,
+          completedAt: new Date(Date.now() - 86400000), // Yesterday
+          achievements: ['Completed first session', 'Strong technical answers'],
+          improvementAreas: ['Response structure', 'Time management'],
+        },
+        {
+          id: '2',
+          jobTitle: 'Product Manager',
+          industry: 'Product Management',
+          questionsAnswered: 3,
+          averageScore: 6.5,
+          duration: 18,
+          completedAt: new Date(Date.now() - 172800000), // 2 days ago
+          achievements: ['Good behavioral responses'],
+          improvementAreas: ['Strategic thinking', 'Metrics knowledge'],
+        },
+      ];
+      setPracticeHistory(mockHistory);
+    } catch (error) {
+      console.error('Error loading practice history:', error);
     }
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 90) return 'text-green-600';
-    if (score >= 80) return 'text-blue-600';
-    if (score >= 70) return 'text-yellow-600';
-    return 'text-red-600';
+  const loadUserStats = async () => {
+    try {
+      // This would be an API call to fetch user's overall stats
+      // For now, using mock data
+      const mockStats = {
+        totalSessions: 2,
+        totalQuestions: 8,
+        averageScore: 7.2,
+        totalPracticeTime: 43,
+        improvementTrend: 'improving',
+        strongestSkills: ['Technical Knowledge', 'Problem Solving'],
+        areasForImprovement: ['Time Management', 'Response Structure'],
+      };
+      setUserStats(mockStats);
+    } catch (error) {
+      console.error('Error loading user stats:', error);
+    }
   };
 
-  if (practiceActive) {
-    return (
-      <MainLayout
-        user={mockUser}
-        onLogout={handleLogout}
-      >
-        <div className="space-y-6">
-          {/* Practice Session Header */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center space-x-2">
-                    <BookOpen className="h-5 w-5" />
-                    <span>Practice Session - {mockQuestionCategories.find(c => c.id === selectedCategory)?.name}</span>
-                  </CardTitle>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Question 1 of 5 • Time: 02:34
-                  </p>
-                </div>
-                <Button onClick={handleStopPractice} variant="outline">
-                  End Session
-                </Button>
-              </div>
-            </CardHeader>
-          </Card>
+  const handleStartPractice = async (config: PracticeConfig) => {
+    setIsLoading(true);
+    try {
+      // This would be an API call to create a practice session
+      // For now, creating mock session
+      const mockSession = {
+        id: `session-${Date.now()}`,
+        questions: generateMockQuestions(config),
+        currentQuestionIndex: 0,
+        responses: [],
+      };
+      
+      setSession(mockSession);
+      setCurrentQuestion(mockSession.questions[0]);
+      setMode('question');
+    } catch (error) {
+      console.error('Error starting practice session:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-          {/* Current Question */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Current Question</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-lg text-gray-900">
-                    "Tell me about a time when you had to work with a difficult team member. How did you handle the situation and what was the outcome?"
-                  </p>
-                </div>
-                
-                <div className="flex items-center space-x-4 text-sm text-gray-600">
-                  <div className="flex items-center space-x-1">
-                    <Target className="h-4 w-4" />
-                    <span>Behavioral</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <Clock className="h-4 w-4" />
-                    <span>Recommended: 90 seconds</span>
-                  </div>
-                  <Badge className={getDifficultyColor('intermediate')}>
-                    Intermediate
-                  </Badge>
-                </div>
+  const generateMockQuestions = (config: PracticeConfig) => {
+    const questionTemplates = {
+      technical: [
+        `How would you optimize a slow database query in a ${config.jobTitle} role?`,
+        `Explain the architecture you would design for a scalable ${config.industry.toLowerCase()} application.`,
+        `What are the key technical challenges in ${config.industry} and how would you address them?`,
+      ],
+      behavioral: [
+        `Tell me about a time when you had to work under pressure in your ${config.jobTitle} role.`,
+        `Describe a situation where you had to learn a new technology quickly.`,
+        `Give me an example of when you had to work with a difficult team member.`,
+      ],
+      situational: [
+        `How would you handle a situation where a project deadline is at risk in your role as a ${config.jobTitle}?`,
+        `What would you do if you disagreed with your manager's technical approach?`,
+        `How would you prioritize multiple urgent tasks as a ${config.jobTitle}?`,
+      ],
+      cultural: [
+        `What motivates you in your work as a ${config.jobTitle}?`,
+        `How do you approach teamwork and collaboration in ${config.industry}?`,
+        `What are your long-term career goals in ${config.industry}?`,
+      ],
+    };
 
-                <div className="flex space-x-3">
-                  <Button className="flex items-center space-x-2">
-                    <Play className="h-4 w-4" />
-                    <span>Start Recording</span>
-                  </Button>
-                  <Button variant="outline" className="flex items-center space-x-2">
-                    <RotateCcw className="h-4 w-4" />
-                    <span>Skip Question</span>
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+    const questions = [];
+    for (let i = 0; i < config.questionCount; i++) {
+      const type = config.questionTypes[i % config.questionTypes.length];
+      const templates = questionTemplates[type as keyof typeof questionTemplates] || questionTemplates.behavioral;
+      const questionText = templates[i % templates.length];
+      
+      questions.push({
+        id: `q-${i + 1}`,
+        question: questionText,
+        type: type,
+        category: type === 'technical' ? 'Technical Skills' : type === 'behavioral' ? 'Behavioral' : type === 'situational' ? 'Problem Solving' : 'Cultural Fit',
+        difficulty: config.difficulty,
+        expectedStructure: type === 'behavioral' ? 'STAR method (Situation, Task, Action, Result)' : type === 'technical' ? 'Technical explanation with examples' : 'Problem analysis and solution approach',
+        keyPoints: type === 'behavioral' 
+          ? ['Situation description', 'Task/challenge', 'Actions taken', 'Results achieved']
+          : type === 'technical'
+          ? ['Technical accuracy', 'Best practices', 'Practical examples']
+          : ['Problem identification', 'Solution approach', 'Implementation plan'],
+        timeLimit: type === 'technical' ? 240 : type === 'behavioral' ? 180 : 200,
+      });
+    }
+    return questions;
+  };
 
-          {/* Progress */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Progress</span>
-                <span className="text-sm text-gray-600">1/5 questions</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-blue-600 h-2 rounded-full" style={{ width: '20%' }}></div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </MainLayout>
-    );
-  }
+  const handleSubmitResponse = async (response: string, duration: number) => {
+    if (!session || !currentQuestion) return;
+
+    setIsLoading(true);
+    try {
+      // This would be an API call to submit response and get feedback
+      // For now, generating mock feedback based on question type and response
+      const mockFeedback = generateMockFeedback(currentQuestion, response, duration);
+
+      setLastFeedback(mockFeedback);
+      
+      // Update session with response
+      const updatedSession = {
+        ...session,
+        responses: [...session.responses, { questionId: currentQuestion.id, response, duration, feedback: mockFeedback }],
+      };
+      setSession(updatedSession);
+      setMode('feedback');
+    } catch (error) {
+      console.error('Error submitting response:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const generateMockFeedback = (question: any, response: string, duration: number) => {
+    const wordCount = response.split(' ').length;
+    const baseScore = 6 + Math.random() * 2; // Base score between 6-8
+    
+    // Adjust score based on response characteristics
+    let contentScore = baseScore;
+    let structureScore = baseScore;
+    let clarityScore = baseScore;
+    
+    // Content scoring
+    if (wordCount > 100) contentScore += 0.5;
+    if (wordCount > 200) contentScore += 0.5;
+    if (response.toLowerCase().includes('example')) contentScore += 0.3;
+    
+    // Structure scoring for behavioral questions
+    if (question.type === 'behavioral') {
+      const hasSTAR = ['situation', 'task', 'action', 'result'].some(keyword => 
+        response.toLowerCase().includes(keyword)
+      );
+      if (hasSTAR) structureScore += 1;
+    }
+    
+    // Time management
+    const timeScore = question.timeLimit ? Math.max(0, 1 - Math.abs(duration - question.timeLimit) / question.timeLimit) : 0.8;
+    clarityScore += timeScore * 0.5;
+    
+    const overallScore = (contentScore + structureScore + clarityScore) / 3;
+    
+    const strengths = [];
+    const improvements = [];
+    const suggestions = [];
+    
+    if (wordCount > 150) strengths.push('Provided detailed response');
+    if (duration <= (question.timeLimit || 180)) strengths.push('Good time management');
+    if (response.includes('example') || response.includes('experience')) strengths.push('Used specific examples');
+    
+    if (wordCount < 50) improvements.push('Provide more detailed explanations');
+    if (duration > (question.timeLimit || 180) * 1.2) improvements.push('Work on being more concise');
+    if (question.type === 'behavioral' && !response.toLowerCase().includes('result')) {
+      improvements.push('Include measurable outcomes and results');
+    }
+    
+    suggestions.push('Practice structuring your responses with clear beginning, middle, and end');
+    if (question.type === 'behavioral') suggestions.push('Use the STAR method for behavioral questions');
+    if (question.type === 'technical') suggestions.push('Include specific technical details and best practices');
+    
+    return {
+      overallScore: Math.min(10, Math.max(1, overallScore)),
+      contentScore: Math.min(10, Math.max(1, contentScore)),
+      structureScore: Math.min(10, Math.max(1, structureScore)),
+      clarityScore: Math.min(10, Math.max(1, clarityScore)),
+      feedback: `Your response demonstrates ${overallScore >= 7 ? 'good' : 'basic'} understanding of the question. ${
+        wordCount > 100 ? 'You provided sufficient detail' : 'Consider adding more specific examples'
+      }. ${duration <= (question.timeLimit || 180) ? 'Your timing was appropriate' : 'Consider being more concise'}.`,
+      strengths,
+      improvements,
+      suggestions,
+    };
+  };
+
+  const handleContinue = () => {
+    if (!session) return;
+
+    const nextIndex = session.currentQuestionIndex + 1;
+    
+    if (nextIndex < session.questions.length) {
+      // Move to next question
+      const updatedSession = {
+        ...session,
+        currentQuestionIndex: nextIndex,
+      };
+      setSession(updatedSession);
+      setCurrentQuestion(session.questions[nextIndex]);
+      setMode('question');
+    } else {
+      // Complete session
+      handleCompleteSession();
+    }
+  };
+
+  const handleCompleteSession = async () => {
+    if (!session) return;
+
+    setIsLoading(true);
+    try {
+      // Calculate session summary
+      const averageScore = session.responses.reduce((sum, r) => sum + r.feedback.overallScore, 0) / session.responses.length;
+      const totalDuration = session.responses.reduce((sum, r) => sum + r.duration, 0);
+      
+      const mockSummary = {
+        id: session.id,
+        jobTitle: 'Software Engineer', // This would come from session config
+        industry: 'Software Engineering',
+        questionsAnswered: session.responses.length,
+        averageScore: averageScore,
+        duration: Math.round(totalDuration / 60), // Convert to minutes
+        completedAt: new Date(),
+        achievements: [
+          ...(averageScore >= 8 ? ['Excellent performance'] : []),
+          ...(session.responses.length >= 5 ? ['Completed full session'] : []),
+          ...(session.responses.some(r => r.feedback.structureScore >= 8) ? ['Strong response structure'] : []),
+        ],
+        improvementAreas: [
+          ...(averageScore < 7 ? ['Overall response quality'] : []),
+          ...(session.responses.some(r => r.duration > 200) ? ['Time management'] : []),
+          ...(session.responses.some(r => r.feedback.structureScore < 6) ? ['Response structure'] : []),
+        ],
+      };
+
+      setSessionSummary(mockSummary);
+      setMode('summary');
+      
+      // Refresh history
+      await loadPracticeHistory();
+      await loadUserStats();
+    } catch (error) {
+      console.error('Error completing session:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleViewHistory = () => {
+    setMode('history');
+  };
+
+  const handleViewSession = (sessionId: string) => {
+    // This would navigate to a detailed session view
+    console.log('View session:', sessionId);
+  };
+
+  const handleStartNewSession = () => {
+    setSession(null);
+    setCurrentQuestion(null);
+    setLastFeedback(null);
+    setSessionSummary(null);
+    setMode('setup');
+  };
 
   return (
-    <MainLayout
-      user={mockUser}
-      onLogout={handleLogout}
-    >
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-green-600 to-blue-600 rounded-lg p-6 text-white">
-          <h1 className="text-2xl font-bold mb-2">Practice Mode</h1>
-          <p className="text-green-100">
-            Improve your interview skills with AI-powered practice sessions. Get instant feedback and track your progress.
-          </p>
+    <div className="min-h-screen bg-gray-50">
+      {mode === 'setup' && (
+        <div className="py-8">
+          <PracticeSetup 
+            onStartPractice={handleStartPractice}
+            isLoading={isLoading}
+          />
         </div>
+      )}
 
-        {/* Question Categories */}
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Choose a Practice Category</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {mockQuestionCategories.map((category) => (
-              <Card key={category.id} className={`cursor-pointer transition-all hover:shadow-md border-2 ${category.color}`}>
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-lg mb-2">{category.name}</h3>
-                      <p className="text-sm text-gray-600 mb-3">{category.description}</p>
-                      
-                      <div className="flex items-center space-x-4 text-sm">
-                        <span className="flex items-center space-x-1">
-                          <BookOpen className="h-4 w-4" />
-                          <span>{category.count} questions</span>
-                        </span>
-                        <Badge className={getDifficultyColor(category.difficulty)}>
-                          {category.difficulty}
-                        </Badge>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-gray-400" />
-                  </div>
-                  
-                  <Button 
-                    onClick={() => handleStartPractice(category.id)}
-                    className="w-full flex items-center justify-center space-x-2"
-                  >
-                    <Play className="h-4 w-4" />
-                    <span>Start Practice</span>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+      {mode === 'question' && currentQuestion && (
+        <div className="py-8">
+          <PracticeQuestion
+            question={currentQuestion}
+            onSubmitResponse={handleSubmitResponse}
+            isLoading={isLoading}
+          />
         </div>
+      )}
 
-        {/* Practice History */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Practice Sessions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {mockPracticeHistory.map((session) => (
-                <div key={session.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className="p-2 bg-blue-50 rounded-lg">
-                      <BookOpen className="h-5 w-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <h4 className="font-medium text-gray-900">{session.category}</h4>
-                      <p className="text-sm text-gray-600">
-                        {session.questionsAnswered} questions • {session.duration} minutes
-                      </p>
-                      <p className="text-xs text-gray-500">{session.date}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="text-right">
-                    <div className="flex items-center space-x-1 mb-1">
-                      <Star className="h-4 w-4 text-yellow-500" />
-                      <span className={`font-semibold ${getScoreColor(session.score)}`}>
-                        {session.score}%
-                      </span>
-                    </div>
-                    <Button variant="ghost" size="sm">
-                      Review
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </MainLayout>
+      {mode === 'feedback' && lastFeedback && (
+        <div className="py-8">
+          <PracticeFeedback
+            feedback={lastFeedback}
+            onContinue={handleContinue}
+            isLastQuestion={session ? session.currentQuestionIndex >= session.questions.length - 1 : false}
+          />
+        </div>
+      )}
+
+      {mode === 'summary' && sessionSummary && (
+        <div className="py-8">
+          <PracticeSessionSummary
+            summary={sessionSummary}
+            onStartNewSession={handleStartNewSession}
+            onViewHistory={handleViewHistory}
+          />
+        </div>
+      )}
+
+      {mode === 'history' && (
+        <div className="py-8">
+          <PracticeHistory
+            sessions={practiceHistory}
+            userStats={userStats}
+            onViewSession={handleViewSession}
+            onStartNewSession={handleStartNewSession}
+          />
+        </div>
+      )}
+    </div>
   );
 }
