@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Observable, Subject, from, throwError, of } from 'rxjs';
-import { map, catchError, switchMap, tap, mergeMap } from 'rxjs/operators';
+import { Observable, Subject, of } from 'rxjs';
+import { mergeMap } from 'rxjs/operators';
 import * as crypto from 'crypto';
 import { TranscriptionRepository } from './transcription.repository';
 import { GoogleSpeechService } from './providers/google-speech.service';
@@ -8,6 +8,9 @@ import { WhisperService } from './providers/whisper.service';
 import { AudioProcessingService } from './services/audio-processing.service';
 import { SpeakerDiarizationService } from './services/speaker-diarization.service';
 import { TranscriptionCacheService } from './services/transcription-cache.service';
+import { TranscriptionFallbackService } from './services/transcription-fallback.service';
+import { ErrorHandlerService } from '../../common/errors/error-handler.service';
+import { ErrorType, ErrorSeverity } from '../../common/errors/error-types';
 import {
   TranscriptionResult,
   AudioChunk,
@@ -30,6 +33,8 @@ export class TranscriptionService {
     private readonly audioProcessor: AudioProcessingService,
     private readonly speakerDiarization: SpeakerDiarizationService,
     private readonly cache: TranscriptionCacheService,
+    private readonly fallbackService: TranscriptionFallbackService,
+    private readonly errorHandler: ErrorHandlerService,
   ) {
     this.initializeProviders();
   }
@@ -187,6 +192,13 @@ export class TranscriptionService {
 
   async transcribeAudioChunk(audioChunkDto: AudioChunkDto): Promise<TranscriptionResult> {
     const startTime = Date.now();
+    const context = {
+      userId: audioChunkDto.userId,
+      sessionId: audioChunkDto.sessionId,
+      service: 'transcription',
+      operation: 'transcribeAudioChunk',
+      timestamp: new Date(),
+    };
 
     try {
       // Decode audio data
@@ -212,6 +224,13 @@ export class TranscriptionService {
         };
       }
 
+      // Use fallback service for transcription with error handling
+      const result = await this.fallbackService.transcribeWithFallback(
+        processedAudio,
+        audioChunkDto.sessionId,
+        audioChunkDto.userId,
+      );
+
       // Save audio chunk
       const audioChunkRecord = await this.saveAudioChunk({
         sessionId: audioChunkDto.sessionId,
@@ -223,16 +242,6 @@ export class TranscriptionService {
         duration: audioChunkDto.duration,
       });
 
-      // Select provider and transcribe
-      const config = audioChunkDto.config || {};
-      const provider = await this.selectProvider(config.provider);
-      
-      if (!provider) {
-        throw new Error('No transcription provider available');
-      }
-
-      const result = await provider.transcribeAudio(processedAudio, config);
-      
       // Enhance result
       const enhancedResult = {
         ...result,
@@ -241,11 +250,16 @@ export class TranscriptionService {
       };
 
       // Apply speaker diarization if enabled
+      const config = audioChunkDto.config || {};
       if (config.enableSpeakerDiarization) {
-        const speakers = await this.speakerDiarization.identifySpeakers(processedAudio, config);
-        if (speakers.length > 0) {
-          const assignedResult = this.speakerDiarization.assignSpeakerToTranscription(enhancedResult, speakers);
-          Object.assign(enhancedResult, assignedResult);
+        try {
+          const speakers = await this.speakerDiarization.identifySpeakers(processedAudio, config);
+          if (speakers.length > 0) {
+            const assignedResult = this.speakerDiarization.assignSpeakerToTranscription(enhancedResult, speakers);
+            Object.assign(enhancedResult, assignedResult);
+          }
+        } catch (diarizationError) {
+          this.logger.warn('Speaker diarization failed, continuing without it', diarizationError);
         }
       }
 
@@ -260,7 +274,7 @@ export class TranscriptionService {
         latency: Date.now() - startTime,
         accuracy: result.confidence,
         confidence: result.confidence,
-        provider: provider.getProviderName(),
+        provider: result.provider || 'unknown',
         cacheHit: false,
         processingTime: Date.now() - startTime,
         audioSize: processedAudio.length,
@@ -269,8 +283,16 @@ export class TranscriptionService {
 
       return enhancedResult;
     } catch (error) {
-      this.logger.error('Error transcribing audio chunk', error);
-      throw error;
+      const appError = this.errorHandler.createError(
+        ErrorType.TRANSCRIPTION_API_FAILURE,
+        ErrorSeverity.HIGH,
+        context,
+        'Failed to transcribe audio chunk',
+        error,
+      );
+      
+      await this.errorHandler.handleError(appError);
+      throw appError;
     }
   }
 

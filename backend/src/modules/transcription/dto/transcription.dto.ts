@@ -57,6 +57,10 @@ export class AudioChunkDto {
   @IsString()
   sessionId: string;
 
+  @IsString()
+  @IsOptional()
+  userId?: string;
+
   @IsNumber()
   @Min(0)
   chunkIndex: number;
