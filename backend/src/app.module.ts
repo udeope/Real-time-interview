@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -13,8 +13,12 @@ import { TranscriptionModule } from './modules/transcription/transcription.modul
 import { ContextAnalysisModule } from './modules/context-analysis/context-analysis.module';
 import { ResponseGenerationModule } from './modules/response-generation/response-generation.module';
 import { PracticeModule } from './modules/practice/practice.module';
+import { CacheModule } from './modules/cache/cache.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { RateLimitMiddleware } from './modules/cache/middleware/rate-limit.middleware';
+import { CacheMiddleware } from './modules/cache/middleware/cache.middleware';
 import { validateEnvironment } from './config/env.validation';
+import cacheConfig from './config/cache.config';
 
 @Module({
   imports: [
@@ -22,6 +26,7 @@ import { validateEnvironment } from './config/env.validation';
       isGlobal: true,
       envFilePath: '.env',
       validate: validateEnvironment,
+      load: [cacheConfig],
     }),
     ThrottlerModule.forRoot([
       {
@@ -30,6 +35,7 @@ import { validateEnvironment } from './config/env.validation';
       },
     ]),
     DatabaseModule,
+    CacheModule,
     AuthModule,
     UserModule,
     InterviewSessionModule,
@@ -48,4 +54,16 @@ import { validateEnvironment } from './config/env.validation';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Apply rate limiting middleware to all routes
+    consumer
+      .apply(RateLimitMiddleware)
+      .forRoutes('*');
+
+    // Apply cache middleware to GET routes
+    consumer
+      .apply(CacheMiddleware)
+      .forRoutes('api/*');
+  }
+}

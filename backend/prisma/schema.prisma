@@ -19,9 +19,15 @@ model User {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
-  profile          UserProfile?
-  sessions         InterviewSession[]
-  practiceSessions PracticeSession[]
+  profile            UserProfile?
+  sessions           InterviewSession[]
+  practiceSessions   PracticeSession[]
+  consents           UserConsent[]
+  auditLogs          AuditLog[]
+  usagePatterns      UsagePattern[]
+  encryptionKeys     EncryptionKey[]
+  dataExportRequests DataExportRequest[]
+  privacySettings    PrivacySetting?
 
   @@map("users")
 }
@@ -57,6 +63,7 @@ model InterviewSession {
   metrics              SessionMetrics[]
   transcriptionResults TranscriptionResult[]
   audioChunks          AudioChunk[]
+  auditLogs            AuditLog[]
 
   @@map("interview_sessions")
 }
@@ -258,4 +265,138 @@ model PracticeAnalytics {
 
   @@index([userId, createdAt])
   @@map("practice_analytics")
+}
+
+// Security and Privacy Models
+
+model UserConsent {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  consentType String    @map("consent_type") // 'audio_processing', 'data_storage', 'analytics', 'marketing'
+  granted     Boolean   @default(false)
+  grantedAt   DateTime? @map("granted_at")
+  revokedAt   DateTime? @map("revoked_at")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  version     String    // Version of privacy policy/terms
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, consentType, version])
+  @@index([userId])
+  @@index([consentType])
+  @@map("user_consents")
+}
+
+model DataRetentionPolicy {
+  id            String   @id @default(cuid())
+  dataType      String   @map("data_type") // 'audio', 'transcription', 'session', 'analytics'
+  retentionDays Int      @map("retention_days")
+  autoDelete    Boolean  @default(true) @map("auto_delete")
+  description   String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("data_retention_policies")
+}
+
+model AuditLog {
+  id           String    @id @default(cuid())
+  userId       String?   @map("user_id")
+  sessionId    String?   @map("session_id")
+  action       String    // 'login', 'audio_capture', 'transcription', 'response_generation', 'data_export', 'data_delete'
+  resourceType String?   @map("resource_type") // 'user', 'session', 'audio', 'transcription'
+  resourceId   String?   @map("resource_id")
+  details      Json?
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  success      Boolean   @default(true)
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user    User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  session InterviewSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model UsagePattern {
+  id             String    @id @default(cuid())
+  userId         String    @map("user_id")
+  patternType    String    @map("pattern_type") // 'session_frequency', 'audio_volume', 'api_usage', 'suspicious_activity'
+  patternData    Json      @map("pattern_data")
+  riskScore      Decimal   @default(0.00) @map("risk_score") @db.Decimal(5, 2)
+  flagged        Boolean   @default(false)
+  flaggedReason  String?   @map("flagged_reason")
+  reviewed       Boolean   @default(false)
+  reviewedBy     String?   @map("reviewed_by")
+  reviewedAt     DateTime? @map("reviewed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([flagged])
+  @@map("usage_patterns")
+}
+
+model EncryptionKey {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  keyType   String    @map("key_type") // 'audio', 'transcription', 'profile'
+  keyHash   String    @map("key_hash") // Hashed version of the key
+  salt      String
+  algorithm String    @default("AES-256-GCM")
+  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt DateTime? @map("expires_at")
+  isActive  Boolean   @default(true) @map("is_active")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyType])
+  @@index([userId])
+  @@map("encryption_keys")
+}
+
+model DataExportRequest {
+  id                  String    @id @default(cuid())
+  userId              String    @map("user_id")
+  requestType         String    @map("request_type") // 'export', 'delete'
+  status              String    @default("pending") // 'pending', 'processing', 'completed', 'failed'
+  requestedDataTypes  Json?     @map("requested_data_types") // Array of data types requested
+  exportUrl           String?   @map("export_url")
+  expiresAt           DateTime? @map("expires_at")
+  completedAt         DateTime? @map("completed_at")
+  errorMessage        String?   @map("error_message")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("data_export_requests")
+}
+
+model PrivacySetting {
+  id                        String   @id @default(cuid())
+  userId                    String   @unique @map("user_id")
+  audioRetentionDays        Int      @default(30) @map("audio_retention_days")
+  transcriptionRetentionDays Int     @default(90) @map("transcription_retention_days")
+  analyticsEnabled          Boolean  @default(true) @map("analytics_enabled")
+  dataSharingEnabled        Boolean  @default(false) @map("data_sharing_enabled")
+  marketingEmailsEnabled    Boolean  @default(false) @map("marketing_emails_enabled")
+  sessionRecordingEnabled   Boolean  @default(true) @map("session_recording_enabled")
+  aiTrainingConsent         Boolean  @default(false) @map("ai_training_consent")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("privacy_settings")
 }
