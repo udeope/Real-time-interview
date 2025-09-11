@@ -14,6 +14,7 @@ import { ContextAnalysisModule } from './modules/context-analysis/context-analys
 import { ResponseGenerationModule } from './modules/response-generation/response-generation.module';
 import { PracticeModule } from './modules/practice/practice.module';
 import { CacheModule } from './modules/cache/cache.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RateLimitMiddleware } from './modules/cache/middleware/rate-limit.middleware';
 import { CacheMiddleware } from './modules/cache/middleware/cache.middleware';
@@ -44,6 +45,7 @@ import cacheConfig from './config/cache.config';
     ContextAnalysisModule,
     ResponseGenerationModule,
     PracticeModule,
+    IntegrationsModule,
   ],
   controllers: [AppController],
   providers: [

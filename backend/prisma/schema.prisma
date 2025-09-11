@@ -28,6 +28,11 @@ model User {
   encryptionKeys     EncryptionKey[]
   dataExportRequests DataExportRequest[]
   privacySettings    PrivacySetting?
+  integrations       UserIntegration[]
+  dataExports        DataExport[]
+  webhookEndpoints   WebhookEndpoint[]
+  calendarEvents     CalendarEvent[]
+  videoMeetings      VideoMeeting[]
 
   @@map("users")
 }
@@ -399,4 +404,192 @@ model PrivacySetting {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("privacy_settings")
+}
+// 
+External Integrations Models
+
+enum IntegrationType {
+  LINKEDIN
+  GOOGLE_CALENDAR
+  OUTLOOK_CALENDAR
+  ZOOM
+  TEAMS
+  GOOGLE_MEET
+}
+
+enum WebhookEvent {
+  SESSION_STARTED
+  SESSION_COMPLETED
+  SESSION_PAUSED
+  TRANSCRIPTION_COMPLETED
+  RESPONSE_GENERATED
+  PRACTICE_COMPLETED
+  INTEGRATION_CONNECTED
+  INTEGRATION_DISCONNECTED
+  EXPORT_COMPLETED
+  USER_PROFILE_UPDATED
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  RETRYING
+}
+
+model UserIntegration {
+  id               String          @id @default(cuid())
+  userId           String          @map("user_id")
+  integrationType  IntegrationType @map("integration_type")
+  providerUserId   String?         @map("provider_user_id")
+  accessToken      String          @map("access_token")
+  refreshToken     String?         @map("refresh_token")
+  expiresAt        DateTime?       @map("expires_at")
+  scopes           String[]
+  isActive         Boolean         @default(true) @map("is_active")
+  lastSync         DateTime?       @map("last_sync")
+  syncData         Json?           @map("sync_data")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendarEvents CalendarEvent[]
+  videoMeetings  VideoMeeting[]
+
+  @@unique([userId, integrationType])
+  @@index([userId])
+  @@index([integrationType])
+  @@map("user_integrations")
+}
+
+model DataExport {
+  id             String       @id @default(cuid())
+  userId         String       @map("user_id")
+  exportFormat   String       @map("export_format")
+  dataTypes      String[]     @map("data_types")
+  includeOptions Json?        @map("include_options")
+  status         ExportStatus @default(PENDING)
+  filePath       String?      @map("file_path")
+  fileSize       Int?         @map("file_size")
+  downloadUrl    String?      @map("download_url")
+  expiresAt      DateTime?    @map("expires_at")
+  errorMessage   String?      @map("error_message")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  completedAt    DateTime?    @map("completed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("data_exports")
+}
+
+model WebhookEndpoint {
+  id            String        @id @default(cuid())
+  userId        String        @map("user_id")
+  url           String
+  events        WebhookEvent[]
+  secret        String
+  isActive      Boolean       @default(true) @map("is_active")
+  failureCount  Int           @default(0) @map("failure_count")
+  maxRetries    Int           @default(3) @map("max_retries")
+  lastTriggered DateTime?     @map("last_triggered")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id             String                @id @default(cuid())
+  webhookId      String                @map("webhook_id")
+  event          WebhookEvent
+  payload        Json
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempts       Int                   @default(0)
+  lastAttempt    DateTime?             @map("last_attempt")
+  nextRetry      DateTime?             @map("next_retry")
+  responseStatus Int?                  @map("response_status")
+  responseBody   String?               @map("response_body")
+  errorMessage   String?               @map("error_message")
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  webhook WebhookEndpoint @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([nextRetry])
+  @@map("webhook_deliveries")
+}
+
+model CalendarEvent {
+  id                  String   @id @default(cuid())
+  userId              String   @map("user_id")
+  integrationId       String   @map("integration_id")
+  externalId          String   @map("external_id")
+  title               String
+  description         String?
+  startTime           DateTime @map("start_time")
+  endTime             DateTime @map("end_time")
+  attendees           String[]
+  location            String?
+  meetingUrl          String?  @map("meeting_url")
+  isInterviewRelated  Boolean  @default(false) @map("is_interview_related")
+  companyName         String?  @map("company_name")
+  jobTitle            String?  @map("job_title")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  integration UserIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, externalId])
+  @@index([userId])
+  @@index([integrationId])
+  @@index([startTime])
+  @@index([isInterviewRelated])
+  @@map("calendar_events")
+}
+
+model VideoMeeting {
+  id                  String   @id @default(cuid())
+  userId              String   @map("user_id")
+  integrationId       String   @map("integration_id")
+  externalId          String   @map("external_id")
+  title               String
+  startTime           DateTime @map("start_time")
+  duration            Int      // Duration in minutes
+  joinUrl             String   @map("join_url")
+  hostId              String?  @map("host_id")
+  platform            String
+  isRecorded          Boolean? @map("is_recorded")
+  recordingUrl        String?  @map("recording_url")
+  participants        Json?
+  isInterviewRelated  Boolean  @default(false) @map("is_interview_related")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  integration UserIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, externalId])
+  @@index([userId])
+  @@index([integrationId])
+  @@index([startTime])
+  @@index([isInterviewRelated])
+  @@map("video_meetings")
 }
