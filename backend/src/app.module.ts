@@ -16,6 +16,8 @@ import { PracticeModule } from './modules/practice/practice.module';
 import { CacheModule } from './modules/cache/cache.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { SubscriptionModule } from './modules/subscription/subscription.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { ErrorHandlingModule } from './common/errors/error-handling.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RateLimitMiddleware } from './modules/cache/middleware/rate-limit.middleware';
@@ -50,6 +52,8 @@ import cacheConfig from './config/cache.config';
     PracticeModule,
     IntegrationsModule,
     MonitoringModule,
+    SubscriptionModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [

@@ -36,6 +36,10 @@ model User {
   performanceMetrics PerformanceMetrics[]
   satisfactionMetrics UserSatisfactionMetrics[]
   usageAnalytics     UsageAnalytics[]
+  subscription       Subscription?
+  usageTracking      UsageTracking[]
+  billingHistory     BillingHistory[]
+  preferences        UserPreferences?
 
   @@map("users")
 }
@@ -688,4 +692,137 @@ model SystemHealthMetrics {
 
   @@index([timestamp])
   @@map("system_health_metrics")
+}
+
+// Subscription Management Models
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  UNPAID
+  TRIALING
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  REFUNDED
+}
+
+model Subscription {
+  id                    String             @id @default(cuid())
+  userId                String             @unique @map("user_id")
+  tier                  SubscriptionTier   @default(FREE)
+  status                SubscriptionStatus @default(ACTIVE)
+  stripeSubscriptionId  String?            @unique @map("stripe_subscription_id")
+  stripeCustomerId      String?            @map("stripe_customer_id")
+  currentPeriodStart    DateTime?          @map("current_period_start")
+  currentPeriodEnd      DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd     Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt            DateTime?          @map("canceled_at")
+  trialStart            DateTime?          @map("trial_start")
+  trialEnd              DateTime?          @map("trial_end")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usageTracking  UsageTracking[]
+  billingHistory BillingHistory[]
+
+  @@map("subscriptions")
+}
+
+model SubscriptionPlan {
+  id                   String           @id @default(cuid())
+  tier                 SubscriptionTier @unique
+  name                 String
+  description          String?
+  priceMonthly         Decimal          @map("price_monthly") @db.Decimal(10, 2)
+  priceYearly          Decimal?         @map("price_yearly") @db.Decimal(10, 2)
+  features             Json
+  limits               Json
+  stripePriceIdMonthly String?          @map("stripe_price_id_monthly")
+  stripePriceIdYearly  String?          @map("stripe_price_id_yearly")
+  isActive             Boolean          @default(true) @map("is_active")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  @@map("subscription_plans")
+}
+
+model UsageTracking {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  subscriptionId String   @map("subscription_id")
+  feature        String
+  usageCount     Int      @default(0) @map("usage_count")
+  usageLimit     Int?     @map("usage_limit")
+  periodStart    DateTime @map("period_start")
+  periodEnd      DateTime @map("period_end")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, feature, periodStart])
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([feature])
+  @@index([periodStart])
+  @@map("usage_tracking")
+}
+
+model BillingHistory {
+  id             String        @id @default(cuid())
+  userId         String        @map("user_id")
+  subscriptionId String        @map("subscription_id")
+  stripeInvoiceId String?      @map("stripe_invoice_id")
+  amount         Decimal       @db.Decimal(10, 2)
+  currency       String        @default("usd")
+  status         PaymentStatus
+  description    String?
+  invoiceUrl     String?       @map("invoice_url")
+  paidAt         DateTime?     @map("paid_at")
+  dueDate        DateTime?     @map("due_date")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@map("billing_history")
+}
+
+model UserPreferences {
+  id                   String   @id @default(cuid())
+  userId               String   @unique @map("user_id")
+  language             String   @default("en")
+  timezone             String   @default("UTC")
+  emailNotifications   Boolean  @default(true) @map("email_notifications")
+  pushNotifications    Boolean  @default(true) @map("push_notifications")
+  interviewReminders   Boolean  @default(true) @map("interview_reminders")
+  practiceReminders    Boolean  @default(true) @map("practice_reminders")
+  weeklyReports        Boolean  @default(true) @map("weekly_reports")
+  theme                String   @default("light")
+  audioQuality         String   @default("high") @map("audio_quality")
+  autoSaveResponses    Boolean  @default(true) @map("auto_save_responses")
+  showConfidenceScores Boolean  @default(true) @map("show_confidence_scores")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }

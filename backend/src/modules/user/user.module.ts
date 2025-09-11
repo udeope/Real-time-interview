@@ -4,6 +4,8 @@ import { UserController } from './user.controller';
 import { UserRepository } from './user.repository';
 import { UserProfileService } from './user-profile.service';
 import { UserProfileRepository } from './user-profile.repository';
+import { UserPreferencesService } from './services/user-preferences.service';
+import { DatabaseService } from '../../config/database.config';
 
 @Module({
   controllers: [UserController],
@@ -12,7 +14,9 @@ import { UserProfileRepository } from './user-profile.repository';
     UserRepository,
     UserProfileService,
     UserProfileRepository,
+    UserPreferencesService,
+    DatabaseService,
   ],
-  exports: [UserService, UserProfileService],
+  exports: [UserService, UserProfileService, UserPreferencesService],
 })
 export class UserModule {}
