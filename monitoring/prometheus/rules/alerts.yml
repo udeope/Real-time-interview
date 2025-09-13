@@ -1,0 +1,268 @@
+# Prometheus Alert Rules for AI Interview Assistant
+groups:
+  - name: system_alerts
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for more than 5 minutes on {{ $labels.instance }}"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 85% for more than 5 minutes on {{ $labels.instance }}"
+
+      # Low disk space
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 10% on {{ $labels.instance }}"
+
+  - name: application_alerts
+    rules:
+      # Application down
+      - alert: ApplicationDown
+        expr: up{job=~"backend|frontend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: application
+        annotations:
+          summary: "Application is down"
+          description: "{{ $labels.job }} application is down on {{ $labels.instance }}"
+
+      # High response time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="backend"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: application
+        annotations:
+          summary: "High response time"
+          description: "95th percentile response time is above 2 seconds for {{ $labels.job }}"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: application
+        annotations:
+          summary: "High error rate"
+          description: "Error rate is above 5% for {{ $labels.job }}"
+
+      # Too many concurrent connections
+      - alert: TooManyConnections
+        expr: sum(rate(websocket_connections_total[5m])) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          service: websocket
+        annotations:
+          summary: "Too many WebSocket connections"
+          description: "WebSocket connections exceed 1000"
+
+  - name: database_alerts
+    rules:
+      # Database down
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Database is down"
+          description: "PostgreSQL database is not responding"
+
+      # High database connections
+      - alert: HighDatabaseConnections
+        expr: pg_stat_database_numbackends / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High database connections"
+          description: "Database connections are above 80% of maximum"
+
+      # Long running queries
+      - alert: LongRunningQueries
+        expr: pg_stat_activity_max_tx_duration{datname!~"template.*"} > 300
+        for: 2m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Long running database queries"
+          description: "Query running for more than 5 minutes in database {{ $labels.datname }}"
+
+      # Database replication lag
+      - alert: DatabaseReplicationLag
+        expr: pg_stat_replication_lag > 60
+        for: 2m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Database replication lag"
+          description: "Database replication lag is above 60 seconds"
+
+  - name: redis_alerts
+    rules:
+      # Redis down
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache server is not responding"
+
+      # High Redis memory usage
+      - alert: HighRedisMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "High Redis memory usage"
+          description: "Redis memory usage is above 90%"
+
+      # Redis connection issues
+      - alert: RedisConnectionIssues
+        expr: rate(redis_rejected_connections_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis connection issues"
+          description: "Redis is rejecting connections"
+
+  - name: ai_service_alerts
+    rules:
+      # OpenAI API errors
+      - alert: OpenAIAPIErrors
+        expr: rate(openai_api_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: ai
+        annotations:
+          summary: "OpenAI API errors"
+          description: "High rate of OpenAI API errors detected"
+
+      # Transcription service errors
+      - alert: TranscriptionServiceErrors
+        expr: rate(transcription_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: transcription
+        annotations:
+          summary: "Transcription service errors"
+          description: "High rate of transcription errors detected"
+
+      # Response generation latency
+      - alert: HighResponseGenerationLatency
+        expr: histogram_quantile(0.95, rate(response_generation_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: ai
+        annotations:
+          summary: "High response generation latency"
+          description: "95th percentile response generation time is above 10 seconds"
+
+  - name: security_alerts
+    rules:
+      # Too many failed login attempts
+      - alert: TooManyFailedLogins
+        expr: rate(auth_failed_attempts_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "Too many failed login attempts"
+          description: "High rate of failed login attempts detected"
+
+      # Suspicious activity
+      - alert: SuspiciousActivity
+        expr: rate(security_violations_total[5m]) > 1
+        for: 1m
+        labels:
+          severity: critical
+          service: security
+        annotations:
+          summary: "Suspicious activity detected"
+          description: "Security violations detected in the system"
+
+      # Rate limit exceeded
+      - alert: RateLimitExceeded
+        expr: rate(rate_limit_exceeded_total[5m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "Rate limit frequently exceeded"
+          description: "Rate limits are being exceeded frequently"
+
+  - name: business_alerts
+    rules:
+      # Low user activity
+      - alert: LowUserActivity
+        expr: rate(user_sessions_total[1h]) < 10
+        for: 30m
+        labels:
+          severity: info
+          service: business
+        annotations:
+          summary: "Low user activity"
+          description: "User activity is below normal levels"
+
+      # High subscription cancellations
+      - alert: HighSubscriptionCancellations
+        expr: rate(subscription_cancellations_total[1h]) > 5
+        for: 15m
+        labels:
+          severity: warning
+          service: business
+        annotations:
+          summary: "High subscription cancellations"
+          description: "Subscription cancellation rate is above normal"
+
+      # Payment processing errors
+      - alert: PaymentProcessingErrors
+        expr: rate(payment_errors_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: business
+        annotations:
+          summary: "Payment processing errors"
+          description: "High rate of payment processing errors detected"

@@ -1,321 +1,364 @@
 #!/bin/bash
 
 # Production Deployment Script for AI Interview Assistant
-# This script handles the complete production deployment process
+# This script handles the complete deployment process for production environment
 
-set -e
+set -e  # Exit on any error
 
 # Configuration
+PROJECT_NAME="ai-interview-assistant"
+DOCKER_REGISTRY="your-registry.com"
+VERSION=${1:-latest}
 ENVIRONMENT="production"
-NAMESPACE="ai-interview-prod"
-REGISTRY="ghcr.io/your-org"
-IMAGE_TAG=${1:-latest}
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-echo -e "${GREEN}🚀 AI Interview Assistant - Production Deployment${NC}"
-echo -e "${YELLOW}Environment: ${ENVIRONMENT}${NC}"
-echo -e "${YELLOW}Image Tag: ${IMAGE_TAG}${NC}"
+# Logging function
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
 
-# Function to check prerequisites
+error() {
+    echo -e "${RED}[ERROR] $1${NC}" >&2
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS] $1${NC}"
+}
+
+warning() {
+    echo -e "${YELLOW}[WARNING] $1${NC}"
+}
+
+# Check prerequisites
 check_prerequisites() {
-    echo -e "${BLUE}📋 Checking prerequisites...${NC}"
+    log "Checking prerequisites..."
     
-    # Check if kubectl is installed and configured
-    if ! command -v kubectl &> /dev/null; then
-        echo -e "${RED}❌ kubectl not found. Please install kubectl.${NC}"
-        exit 1
-    fi
-    
-    # Check if helm is installed
-    if ! command -v helm &> /dev/null; then
-        echo -e "${RED}❌ helm not found. Please install helm.${NC}"
-        exit 1
-    fi
-    
-    # Check if docker is installed
+    # Check if Docker is installed and running
     if ! command -v docker &> /dev/null; then
-        echo -e "${RED}❌ docker not found. Please install docker.${NC}"
+        error "Docker is not installed"
         exit 1
     fi
     
-    # Check cluster connectivity
-    if ! kubectl cluster-info &> /dev/null; then
-        echo -e "${RED}❌ Cannot connect to Kubernetes cluster.${NC}"
+    if ! docker info &> /dev/null; then
+        error "Docker is not running"
         exit 1
     fi
     
-    echo -e "${GREEN}✅ All prerequisites met${NC}"
-}
-
-# Function to create namespace if it doesn't exist
-create_namespace() {
-    echo -e "${BLUE}📦 Setting up namespace...${NC}"
-    
-    if kubectl get namespace $NAMESPACE &> /dev/null; then
-        echo -e "${YELLOW}⚠️  Namespace $NAMESPACE already exists${NC}"
-    else
-        kubectl apply -f k8s/production/namespace.yaml
-        echo -e "${GREEN}✅ Namespace $NAMESPACE created${NC}"
+    # Check if Docker Compose is installed
+    if ! command -v docker-compose &> /dev/null; then
+        error "Docker Compose is not installed"
+        exit 1
     fi
-}
-
-# Function to deploy secrets
-deploy_secrets() {
-    echo -e "${BLUE}🔐 Deploying secrets...${NC}"
     
-    # Check if secrets management script exists
-    if [ -f "./scripts/secrets-management.sh" ]; then
-        ./scripts/secrets-management.sh $ENVIRONMENT deploy
-        echo -e "${GREEN}✅ Secrets deployed${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Secrets management script not found. Please deploy secrets manually.${NC}"
+    # Check if required files exist
+    if [[ ! -f "docker-compose.prod.yml" ]]; then
+        error "docker-compose.prod.yml not found"
+        exit 1
     fi
+    
+    if [[ ! -f ".env.production" ]]; then
+        error ".env.production not found"
+        exit 1
+    fi
+    
+    success "Prerequisites check passed"
 }
 
-# Function to build and push Docker images
-build_and_push_images() {
-    echo -e "${BLUE}🏗️  Building and pushing Docker images...${NC}"
+# Validate environment variables
+validate_environment() {
+    log "Validating environment variables..."
+    
+    # Source the production environment file
+    set -a
+    source .env.production
+    set +a
+    
+    # Required environment variables
+    required_vars=(
+        "DATABASE_URL"
+        "JWT_SECRET"
+        "ENCRYPTION_MASTER_KEY"
+        "OPENAI_API_KEY"
+        "POSTGRES_PASSWORD"
+    )
+    
+    missing_vars=()
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        error "Missing required environment variables: ${missing_vars[*]}"
+        exit 1
+    fi
+    
+    success "Environment variables validated"
+}
+
+# Create necessary directories
+create_directories() {
+    log "Creating necessary directories..."
+    
+    # Create directories for volumes
+    sudo mkdir -p /var/lib/ai-interview/{postgres,redis,logs,uploads,exports,ssl}
+    sudo mkdir -p /var/log/ai-interview/{nginx,app}
+    
+    # Set proper permissions
+    sudo chown -R 1001:1001 /var/lib/ai-interview/{logs,uploads,exports}
+    sudo chown -R 999:999 /var/lib/ai-interview/postgres
+    sudo chown -R 999:999 /var/lib/ai-interview/redis
+    
+    success "Directories created"
+}
+
+# Setup SSL certificates
+setup_ssl() {
+    log "Setting up SSL certificates..."
+    
+    SSL_DIR="/var/lib/ai-interview/ssl"
+    
+    if [[ ! -f "$SSL_DIR/cert.pem" ]] || [[ ! -f "$SSL_DIR/key.pem" ]]; then
+        warning "SSL certificates not found. Please ensure certificates are placed in $SSL_DIR"
+        warning "Required files: cert.pem, key.pem, ca.pem"
+        
+        # Create self-signed certificates for testing (NOT for production)
+        if [[ "$2" == "--self-signed" ]]; then
+            warning "Creating self-signed certificates for testing..."
+            sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout "$SSL_DIR/key.pem" \
+                -out "$SSL_DIR/cert.pem" \
+                -subj "/C=US/ST=State/L=City/O=Organization/CN=yourdomain.com"
+            sudo cp "$SSL_DIR/cert.pem" "$SSL_DIR/ca.pem"
+        else
+            error "SSL certificates are required for production deployment"
+            exit 1
+        fi
+    fi
+    
+    success "SSL certificates configured"
+}
+
+# Build Docker images
+build_images() {
+    log "Building Docker images..."
     
     # Build backend image
-    echo "Building backend image..."
-    docker build -t $REGISTRY/ai-interview-assistant-backend:$IMAGE_TAG -f backend/Dockerfile.prod backend/
-    docker push $REGISTRY/ai-interview-assistant-backend:$IMAGE_TAG
+    log "Building backend image..."
+    docker build -f backend/Dockerfile.prod -t "${PROJECT_NAME}-backend:${VERSION}" backend/
     
     # Build frontend image
-    echo "Building frontend image..."
-    docker build -t $REGISTRY/ai-interview-assistant-frontend:$IMAGE_TAG -f frontend/Dockerfile.prod frontend/
-    docker push $REGISTRY/ai-interview-assistant-frontend:$IMAGE_TAG
+    log "Building frontend image..."
+    docker build -f frontend/Dockerfile.prod -t "${PROJECT_NAME}-frontend:${VERSION}" frontend/
     
-    echo -e "${GREEN}✅ Images built and pushed${NC}"
+    success "Docker images built successfully"
 }
 
-# Function to deploy database
-deploy_database() {
-    echo -e "${BLUE}🗄️  Deploying database...${NC}"
+# Push images to registry (if registry is configured)
+push_images() {
+    if [[ -n "$DOCKER_REGISTRY" ]] && [[ "$DOCKER_REGISTRY" != "your-registry.com" ]]; then
+        log "Pushing images to registry..."
+        
+        # Tag images for registry
+        docker tag "${PROJECT_NAME}-backend:${VERSION}" "${DOCKER_REGISTRY}/${PROJECT_NAME}-backend:${VERSION}"
+        docker tag "${PROJECT_NAME}-frontend:${VERSION}" "${DOCKER_REGISTRY}/${PROJECT_NAME}-frontend:${VERSION}"
+        
+        # Push images
+        docker push "${DOCKER_REGISTRY}/${PROJECT_NAME}-backend:${VERSION}"
+        docker push "${DOCKER_REGISTRY}/${PROJECT_NAME}-frontend:${VERSION}"
+        
+        success "Images pushed to registry"
+    else
+        log "Skipping registry push (no registry configured)"
+    fi
+}
+
+# Run database migrations
+run_migrations() {
+    log "Running database migrations..."
     
-    kubectl apply -f k8s/production/database.yaml
+    # Start only the database service first
+    docker-compose -f docker-compose.prod.yml up -d postgres redis
     
     # Wait for database to be ready
-    echo "Waiting for database to be ready..."
-    kubectl wait --for=condition=ready pod -l app=postgres -n $NAMESPACE --timeout=300s
-    
-    echo -e "${GREEN}✅ Database deployed${NC}"
-}
-
-# Function to deploy Redis
-deploy_redis() {
-    echo -e "${BLUE}🗄️  Deploying Redis...${NC}"
-    
-    kubectl apply -f k8s/production/redis.yaml
-    
-    # Wait for Redis to be ready
-    echo "Waiting for Redis to be ready..."
-    kubectl wait --for=condition=ready pod -l app=redis -n $NAMESPACE --timeout=300s
-    
-    echo -e "${GREEN}✅ Redis deployed${NC}"
-}
-
-# Function to run database migrations
-run_migrations() {
-    echo -e "${BLUE}🔄 Running database migrations...${NC}"
-    
-    # Get the first backend pod
-    BACKEND_POD=$(kubectl get pods -n $NAMESPACE -l app=backend -o jsonpath='{.items[0].metadata.name}')
-    
-    if [ -n "$BACKEND_POD" ]; then
-        kubectl exec -n $NAMESPACE $BACKEND_POD -- npx prisma migrate deploy
-        echo -e "${GREEN}✅ Database migrations completed${NC}"
-    else
-        echo -e "${YELLOW}⚠️  No backend pod found. Migrations will run on first startup.${NC}"
-    fi
-}
-
-# Function to deploy backend
-deploy_backend() {
-    echo -e "${BLUE}🔧 Deploying backend...${NC}"
-    
-    # Update image tag in deployment
-    sed -i.bak "s|:latest|:$IMAGE_TAG|g" k8s/production/backend-deployment.yaml
-    
-    kubectl apply -f k8s/production/backend-deployment.yaml
-    
-    # Wait for backend to be ready
-    echo "Waiting for backend to be ready..."
-    kubectl wait --for=condition=available deployment/backend -n $NAMESPACE --timeout=300s
-    
-    # Restore original file
-    mv k8s/production/backend-deployment.yaml.bak k8s/production/backend-deployment.yaml
-    
-    echo -e "${GREEN}✅ Backend deployed${NC}"
-}
-
-# Function to deploy frontend
-deploy_frontend() {
-    echo -e "${BLUE}🎨 Deploying frontend...${NC}"
-    
-    # Update image tag in deployment
-    sed -i.bak "s|:latest|:$IMAGE_TAG|g" k8s/production/frontend-deployment.yaml
-    
-    kubectl apply -f k8s/production/frontend-deployment.yaml
-    
-    # Wait for frontend to be ready
-    echo "Waiting for frontend to be ready..."
-    kubectl wait --for=condition=available deployment/frontend -n $NAMESPACE --timeout=300s
-    
-    # Restore original file
-    mv k8s/production/frontend-deployment.yaml.bak k8s/production/frontend-deployment.yaml
-    
-    echo -e "${GREEN}✅ Frontend deployed${NC}"
-}
-
-# Function to deploy ingress
-deploy_ingress() {
-    echo -e "${BLUE}🌐 Deploying ingress...${NC}"
-    
-    kubectl apply -f k8s/production/ingress.yaml
-    
-    echo -e "${GREEN}✅ Ingress deployed${NC}"
-}
-
-# Function to deploy monitoring
-deploy_monitoring() {
-    echo -e "${BLUE}📊 Deploying monitoring...${NC}"
-    
-    if [ -f "monitoring/docker-compose.monitoring.yml" ]; then
-        # For Docker Compose monitoring
-        docker-compose -f monitoring/docker-compose.monitoring.yml up -d
-        echo -e "${GREEN}✅ Monitoring deployed with Docker Compose${NC}"
-    elif [ -d "k8s/monitoring" ]; then
-        # For Kubernetes monitoring
-        kubectl apply -f k8s/monitoring/
-        echo -e "${GREEN}✅ Monitoring deployed to Kubernetes${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Monitoring configuration not found${NC}"
-    fi
-}
-
-# Function to run health checks
-run_health_checks() {
-    echo -e "${BLUE}🏥 Running health checks...${NC}"
-    
-    # Get service URLs
-    BACKEND_URL=$(kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[1].host}')
-    FRONTEND_URL=$(kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[0].host}')
-    
-    # Wait a bit for services to stabilize
+    log "Waiting for database to be ready..."
     sleep 30
     
+    # Run migrations
+    docker-compose -f docker-compose.prod.yml run --rm backend npm run prisma:migrate:deploy
+    
+    success "Database migrations completed"
+}
+
+# Deploy services
+deploy_services() {
+    log "Deploying services..."
+    
+    # Set environment variables for docker-compose
+    export VERSION
+    export PROJECT_NAME
+    
+    # Deploy with docker-compose
+    docker-compose -f docker-compose.prod.yml up -d
+    
+    success "Services deployed"
+}
+
+# Health check
+health_check() {
+    log "Performing health checks..."
+    
+    # Wait for services to start
+    sleep 60
+    
     # Check backend health
-    if curl -f https://$BACKEND_URL/health > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Backend health check passed${NC}"
+    if curl -f http://localhost:4000/health > /dev/null 2>&1; then
+        success "Backend health check passed"
     else
-        echo -e "${RED}❌ Backend health check failed${NC}"
-        exit 1
+        error "Backend health check failed"
+        return 1
     fi
     
     # Check frontend health
-    if curl -f https://$FRONTEND_URL/api/health > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Frontend health check passed${NC}"
+    if curl -f http://localhost:3000/api/health > /dev/null 2>&1; then
+        success "Frontend health check passed"
     else
-        echo -e "${RED}❌ Frontend health check failed${NC}"
-        exit 1
+        error "Frontend health check failed"
+        return 1
     fi
     
-    echo -e "${GREEN}✅ All health checks passed${NC}"
+    success "All health checks passed"
 }
 
-# Function to run smoke tests
-run_smoke_tests() {
-    echo -e "${BLUE}🧪 Running smoke tests...${NC}"
+# Cleanup old images
+cleanup() {
+    log "Cleaning up old images..."
     
-    # Run basic API tests
-    if [ -f "./scripts/smoke-tests.sh" ]; then
-        ./scripts/smoke-tests.sh
-        echo -e "${GREEN}✅ Smoke tests passed${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Smoke tests script not found${NC}"
+    # Remove dangling images
+    docker image prune -f
+    
+    # Remove old versions (keep last 3)
+    docker images "${PROJECT_NAME}-backend" --format "table {{.Tag}}" | tail -n +4 | xargs -r docker rmi "${PROJECT_NAME}-backend:" 2>/dev/null || true
+    docker images "${PROJECT_NAME}-frontend" --format "table {{.Tag}}" | tail -n +4 | xargs -r docker rmi "${PROJECT_NAME}-frontend:" 2>/dev/null || true
+    
+    success "Cleanup completed"
+}
+
+# Backup current deployment
+backup_current() {
+    log "Creating backup of current deployment..."
+    
+    BACKUP_DIR="/var/backups/ai-interview/$(date +%Y%m%d_%H%M%S)"
+    sudo mkdir -p "$BACKUP_DIR"
+    
+    # Backup database
+    docker-compose -f docker-compose.prod.yml exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | sudo tee "$BACKUP_DIR/database.sql" > /dev/null
+    
+    # Backup uploaded files
+    sudo cp -r /var/lib/ai-interview/uploads "$BACKUP_DIR/" 2>/dev/null || true
+    
+    # Backup configuration
+    sudo cp .env.production "$BACKUP_DIR/"
+    sudo cp docker-compose.prod.yml "$BACKUP_DIR/"
+    
+    success "Backup created at $BACKUP_DIR"
+}
+
+# Rollback function
+rollback() {
+    error "Deployment failed. Rolling back..."
+    
+    # Stop current services
+    docker-compose -f docker-compose.prod.yml down
+    
+    # Restore from backup if available
+    LATEST_BACKUP=$(sudo find /var/backups/ai-interview -type d -name "20*" | sort | tail -1)
+    if [[ -n "$LATEST_BACKUP" ]]; then
+        log "Restoring from backup: $LATEST_BACKUP"
+        
+        # Restore database
+        if [[ -f "$LATEST_BACKUP/database.sql" ]]; then
+            docker-compose -f docker-compose.prod.yml up -d postgres
+            sleep 30
+            sudo cat "$LATEST_BACKUP/database.sql" | docker-compose -f docker-compose.prod.yml exec -T postgres psql -U "$POSTGRES_USER" "$POSTGRES_DB"
+        fi
+        
+        # Restore configuration
+        if [[ -f "$LATEST_BACKUP/.env.production" ]]; then
+            sudo cp "$LATEST_BACKUP/.env.production" .env.production
+        fi
+        
+        # Start services with previous configuration
+        docker-compose -f docker-compose.prod.yml up -d
     fi
-}
-
-# Function to display deployment summary
-display_summary() {
-    echo -e "${GREEN}🎉 Deployment Summary${NC}"
-    echo -e "${BLUE}===================${NC}"
     
-    # Get service information
-    kubectl get pods -n $NAMESPACE
-    echo ""
-    kubectl get services -n $NAMESPACE
-    echo ""
-    kubectl get ingress -n $NAMESPACE
-    
-    # Display URLs
-    BACKEND_URL=$(kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[1].host}')
-    FRONTEND_URL=$(kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[0].host}')
-    
-    echo -e "${GREEN}🌐 Application URLs:${NC}"
-    echo -e "Frontend: https://$FRONTEND_URL"
-    echo -e "Backend API: https://$BACKEND_URL"
-    echo -e "Monitoring: http://your-monitoring-url:3001"
-    
-    echo -e "${GREEN}✅ Production deployment completed successfully!${NC}"
-}
-
-# Function to rollback deployment
-rollback_deployment() {
-    echo -e "${YELLOW}🔄 Rolling back deployment...${NC}"
-    
-    kubectl rollout undo deployment/backend -n $NAMESPACE
-    kubectl rollout undo deployment/frontend -n $NAMESPACE
-    
-    echo -e "${GREEN}✅ Rollback completed${NC}"
+    error "Rollback completed"
+    exit 1
 }
 
 # Main deployment function
-deploy() {
+main() {
+    log "Starting production deployment for $PROJECT_NAME version $VERSION"
+    
+    # Set trap for rollback on error
+    trap rollback ERR
+    
     check_prerequisites
-    create_namespace
-    deploy_secrets
-    build_and_push_images
-    deploy_database
-    deploy_redis
-    deploy_backend
+    validate_environment
+    create_directories
+    setup_ssl "$@"
+    backup_current
+    build_images
+    push_images
     run_migrations
-    deploy_frontend
-    deploy_ingress
-    deploy_monitoring
-    run_health_checks
-    run_smoke_tests
-    display_summary
+    deploy_services
+    
+    # Remove trap before health check
+    trap - ERR
+    
+    if health_check; then
+        cleanup
+        success "Deployment completed successfully!"
+        log "Application is available at:"
+        log "  - Frontend: https://yourdomain.com"
+        log "  - API: https://api.yourdomain.com"
+        log "  - Health: https://api.yourdomain.com/health"
+    else
+        rollback
+    fi
 }
 
-# Error handling
-trap 'echo -e "${RED}❌ Deployment failed. Running rollback...${NC}"; rollback_deployment; exit 1' ERR
+# Show usage
+usage() {
+    echo "Usage: $0 [VERSION] [OPTIONS]"
+    echo ""
+    echo "Arguments:"
+    echo "  VERSION     Docker image version (default: latest)"
+    echo ""
+    echo "Options:"
+    echo "  --self-signed    Create self-signed SSL certificates (for testing only)"
+    echo "  --help          Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                    # Deploy latest version"
+    echo "  $0 v1.2.3            # Deploy specific version"
+    echo "  $0 latest --self-signed  # Deploy with self-signed certificates"
+}
 
-# Parse command line arguments
-case "${2:-deploy}" in
-    "deploy")
-        deploy
-        ;;
-    "rollback")
-        rollback_deployment
-        ;;
-    "health-check")
-        run_health_checks
-        ;;
-    "smoke-test")
-        run_smoke_tests
+# Handle command line arguments
+case "${1:-}" in
+    --help|-h)
+        usage
+        exit 0
         ;;
     *)
-        echo "Usage: $0 <image-tag> [deploy|rollback|health-check|smoke-test]"
-        echo "  image-tag: Docker image tag to deploy (default: latest)"
-        echo "  action: deploy (default), rollback, health-check, smoke-test"
-        exit 1
+        main "$@"
         ;;
 esac

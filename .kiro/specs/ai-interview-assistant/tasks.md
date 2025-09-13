@@ -198,14 +198,14 @@
   - Integrate user session management with backend services
   - _Requirements: 7.1_
 
-- [ ] 24. Complete external integration database persistence
+- [x] 24. Complete external integration database persistence
   - Implement database storage for LinkedIn, calendar, and video conferencing integrations
   - Add integration status tracking and error handling
   - Create integration management UI for users to connect/disconnect services
   - Test OAuth flows and token refresh mechanisms
   - _Requirements: 8.1, 8.2, 8.3_
 
-- [ ] 25. Implement settings and preferences functionality
+- [x] 25. Implement settings and preferences functionality
   - Complete user settings save/load functionality in frontend
   - Add account deletion workflow with proper data cleanup
   - Implement privacy settings management and consent tracking

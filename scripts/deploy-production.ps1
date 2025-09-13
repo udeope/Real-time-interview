@@ -1,260 +1,440 @@
 # Production Deployment Script for AI Interview Assistant (PowerShell)
-# This script handles the complete production deployment process
+# This script handles the complete deployment process for production environment
 
 param(
-    [string]$ImageTag = "latest",
-    [string]$Action = "deploy"
+    [string]$Version = "latest",
+    [switch]$SelfSigned,
+    [switch]$Help
 )
 
 # Configuration
-$ENVIRONMENT = "production"
-$NAMESPACE = "ai-interview-prod"
-$REGISTRY = "ghcr.io/your-org"
+$ProjectName = "ai-interview-assistant"
+$DockerRegistry = "your-registry.com"
+$Environment = "production"
 
-Write-Host "🚀 AI Interview Assistant - Production Deployment" -ForegroundColor Green
-Write-Host "Environment: $ENVIRONMENT" -ForegroundColor Yellow
-Write-Host "Image Tag: $ImageTag" -ForegroundColor Yellow
+# Colors for output
+$Colors = @{
+    Red = "Red"
+    Green = "Green"
+    Yellow = "Yellow"
+    Blue = "Blue"
+    White = "White"
+}
 
-# Function to check prerequisites
+# Logging functions
+function Write-Log {
+    param([string]$Message, [string]$Color = "Blue")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host "[$timestamp] $Message" -ForegroundColor $Colors[$Color]
+}
+
+function Write-Error-Log {
+    param([string]$Message)
+    Write-Log "[ERROR] $Message" "Red"
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Log "[SUCCESS] $Message" "Green"
+}
+
+function Write-Warning-Log {
+    param([string]$Message)
+    Write-Log "[WARNING] $Message" "Yellow"
+}
+
+# Show usage
+function Show-Usage {
+    Write-Host @"
+Usage: .\deploy-production.ps1 [OPTIONS]
+
+Parameters:
+  -Version <string>     Docker image version (default: latest)
+  -SelfSigned          Create self-signed SSL certificates (for testing only)
+  -Help               Show this help message
+
+Examples:
+  .\deploy-production.ps1                    # Deploy latest version
+  .\deploy-production.ps1 -Version v1.2.3   # Deploy specific version
+  .\deploy-production.ps1 -SelfSigned       # Deploy with self-signed certificates
+"@
+}
+
+# Check prerequisites
 function Test-Prerequisites {
-    Write-Host "📋 Checking prerequisites..." -ForegroundColor Blue
+    Write-Log "Checking prerequisites..."
     
-    # Check if kubectl is installed
-    if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
-        Write-Host "❌ kubectl not found. Please install kubectl." -ForegroundColor Red
-        exit 1
-    }
-    
-    # Check if helm is installed
-    if (-not (Get-Command helm -ErrorAction SilentlyContinue)) {
-        Write-Host "❌ helm not found. Please install helm." -ForegroundColor Red
-        exit 1
-    }
-    
-    # Check if docker is installed
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-        Write-Host "❌ docker not found. Please install docker." -ForegroundColor Red
-        exit 1
-    }
-    
-    # Check cluster connectivity
+    # Check if Docker is installed and running
     try {
-        kubectl cluster-info | Out-Null
-        Write-Host "✅ All prerequisites met" -ForegroundColor Green
+        $dockerVersion = docker --version
+        if (-not $dockerVersion) {
+            throw "Docker is not installed"
+        }
+        
+        docker info | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Docker is not running"
+        }
     }
     catch {
-        Write-Host "❌ Cannot connect to Kubernetes cluster." -ForegroundColor Red
+        Write-Error-Log "Docker check failed: $_"
         exit 1
     }
-}
-
-# Function to create namespace
-function New-Namespace {
-    Write-Host "📦 Setting up namespace..." -ForegroundColor Blue
     
+    # Check if Docker Compose is installed
     try {
-        kubectl get namespace $NAMESPACE | Out-Null
-        Write-Host "⚠️  Namespace $NAMESPACE already exists" -ForegroundColor Yellow
+        docker-compose --version | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Docker Compose is not installed"
+        }
     }
     catch {
-        kubectl apply -f k8s/production/namespace.yaml
-        Write-Host "✅ Namespace $NAMESPACE created" -ForegroundColor Green
+        Write-Error-Log "Docker Compose is not installed"
+        exit 1
     }
-}
-
-# Function to deploy secrets
-function Deploy-Secrets {
-    Write-Host "🔐 Deploying secrets..." -ForegroundColor Blue
     
-    if (Test-Path "./scripts/secrets-management.sh") {
-        & "./scripts/secrets-management.sh" $ENVIRONMENT deploy
-        Write-Host "✅ Secrets deployed" -ForegroundColor Green
+    # Check if required files exist
+    if (-not (Test-Path "docker-compose.prod.yml")) {
+        Write-Error-Log "docker-compose.prod.yml not found"
+        exit 1
     }
-    else {
-        Write-Host "⚠️  Secrets management script not found. Please deploy secrets manually." -ForegroundColor Yellow
+    
+    if (-not (Test-Path ".env.production")) {
+        Write-Error-Log ".env.production not found"
+        exit 1
     }
+    
+    Write-Success "Prerequisites check passed"
 }
 
-# Function to build and push images
-function Build-AndPushImages {
-    Write-Host "🏗️  Building and pushing Docker images..." -ForegroundColor Blue
+# Validate environment variables
+function Test-Environment {
+    Write-Log "Validating environment variables..."
+    
+    # Load environment variables from .env.production
+    if (Test-Path ".env.production") {
+        Get-Content ".env.production" | ForEach-Object {
+            if ($_ -match "^([^#][^=]+)=(.*)$") {
+                [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+        }
+    }
+    
+    # Required environment variables
+    $requiredVars = @(
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "ENCRYPTION_MASTER_KEY",
+        "OPENAI_API_KEY",
+        "POSTGRES_PASSWORD"
+    )
+    
+    $missingVars = @()
+    foreach ($var in $requiredVars) {
+        $value = [Environment]::GetEnvironmentVariable($var)
+        if ([string]::IsNullOrEmpty($value)) {
+            $missingVars += $var
+        }
+    }
+    
+    if ($missingVars.Count -gt 0) {
+        Write-Error-Log "Missing required environment variables: $($missingVars -join ', ')"
+        exit 1
+    }
+    
+    Write-Success "Environment variables validated"
+}
+
+# Create necessary directories
+function New-Directories {
+    Write-Log "Creating necessary directories..."
+    
+    # Create directories for volumes
+    $directories = @(
+        "C:\var\lib\ai-interview\postgres",
+        "C:\var\lib\ai-interview\redis",
+        "C:\var\lib\ai-interview\logs",
+        "C:\var\lib\ai-interview\uploads",
+        "C:\var\lib\ai-interview\exports",
+        "C:\var\lib\ai-interview\ssl",
+        "C:\var\log\ai-interview\nginx",
+        "C:\var\log\ai-interview\app"
+    )
+    
+    foreach ($dir in $directories) {
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+    }
+    
+    Write-Success "Directories created"
+}
+
+# Setup SSL certificates
+function Set-SSL {
+    Write-Log "Setting up SSL certificates..."
+    
+    $sslDir = "C:\var\lib\ai-interview\ssl"
+    
+    if (-not (Test-Path "$sslDir\cert.pem") -or -not (Test-Path "$sslDir\key.pem")) {
+        Write-Warning-Log "SSL certificates not found. Please ensure certificates are placed in $sslDir"
+        Write-Warning-Log "Required files: cert.pem, key.pem, ca.pem"
+        
+        # Create self-signed certificates for testing (NOT for production)
+        if ($SelfSigned) {
+            Write-Warning-Log "Creating self-signed certificates for testing..."
+            
+            # Create self-signed certificate using PowerShell
+            $cert = New-SelfSignedCertificate -DnsName "yourdomain.com" -CertStoreLocation "cert:\LocalMachine\My"
+            $certPath = "$sslDir\cert.pem"
+            $keyPath = "$sslDir\key.pem"
+            
+            # Export certificate
+            Export-Certificate -Cert $cert -FilePath "$sslDir\cert.crt" -Type CERT
+            Copy-Item "$sslDir\cert.crt" "$sslDir\ca.pem"
+            
+            Write-Warning-Log "Self-signed certificates created. Please convert to PEM format manually."
+        }
+        else {
+            Write-Error-Log "SSL certificates are required for production deployment"
+            exit 1
+        }
+    }
+    
+    Write-Success "SSL certificates configured"
+}
+
+# Build Docker images
+function Build-Images {
+    Write-Log "Building Docker images..."
     
     # Build backend image
-    Write-Host "Building backend image..."
-    docker build -t "$REGISTRY/ai-interview-assistant-backend:$ImageTag" -f backend/Dockerfile.prod backend/
-    docker push "$REGISTRY/ai-interview-assistant-backend:$ImageTag"
+    Write-Log "Building backend image..."
+    docker build -f backend/Dockerfile.prod -t "${ProjectName}-backend:${Version}" backend/
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to build backend image"
+    }
     
     # Build frontend image
-    Write-Host "Building frontend image..."
-    docker build -t "$REGISTRY/ai-interview-assistant-frontend:$ImageTag" -f frontend/Dockerfile.prod frontend/
-    docker push "$REGISTRY/ai-interview-assistant-frontend:$ImageTag"
+    Write-Log "Building frontend image..."
+    docker build -f frontend/Dockerfile.prod -t "${ProjectName}-frontend:${Version}" frontend/
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to build frontend image"
+    }
     
-    Write-Host "✅ Images built and pushed" -ForegroundColor Green
+    Write-Success "Docker images built successfully"
 }
 
-# Function to deploy database
-function Deploy-Database {
-    Write-Host "🗄️  Deploying database..." -ForegroundColor Blue
+# Push images to registry
+function Push-Images {
+    if ($DockerRegistry -and $DockerRegistry -ne "your-registry.com") {
+        Write-Log "Pushing images to registry..."
+        
+        # Tag images for registry
+        docker tag "${ProjectName}-backend:${Version}" "${DockerRegistry}/${ProjectName}-backend:${Version}"
+        docker tag "${ProjectName}-frontend:${Version}" "${DockerRegistry}/${ProjectName}-frontend:${Version}"
+        
+        # Push images
+        docker push "${DockerRegistry}/${ProjectName}-backend:${Version}"
+        docker push "${DockerRegistry}/${ProjectName}-frontend:${Version}"
+        
+        Write-Success "Images pushed to registry"
+    }
+    else {
+        Write-Log "Skipping registry push (no registry configured)"
+    }
+}
+
+# Run database migrations
+function Invoke-Migrations {
+    Write-Log "Running database migrations..."
     
-    kubectl apply -f k8s/production/database.yaml
+    # Start only the database service first
+    docker-compose -f docker-compose.prod.yml up -d postgres redis
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to start database services"
+    }
     
     # Wait for database to be ready
-    Write-Host "Waiting for database to be ready..."
-    kubectl wait --for=condition=ready pod -l app=postgres -n $NAMESPACE --timeout=300s
-    
-    Write-Host "✅ Database deployed" -ForegroundColor Green
-}
-
-# Function to deploy Redis
-function Deploy-Redis {
-    Write-Host "🗄️  Deploying Redis..." -ForegroundColor Blue
-    
-    kubectl apply -f k8s/production/redis.yaml
-    
-    # Wait for Redis to be ready
-    Write-Host "Waiting for Redis to be ready..."
-    kubectl wait --for=condition=ready pod -l app=redis -n $NAMESPACE --timeout=300s
-    
-    Write-Host "✅ Redis deployed" -ForegroundColor Green
-}
-
-# Function to deploy backend
-function Deploy-Backend {
-    Write-Host "🔧 Deploying backend..." -ForegroundColor Blue
-    
-    # Update image tag in deployment
-    $content = Get-Content k8s/production/backend-deployment.yaml
-    $content = $content -replace ":latest", ":$ImageTag"
-    $content | Set-Content k8s/production/backend-deployment-temp.yaml
-    
-    kubectl apply -f k8s/production/backend-deployment-temp.yaml
-    
-    # Wait for backend to be ready
-    Write-Host "Waiting for backend to be ready..."
-    kubectl wait --for=condition=available deployment/backend -n $NAMESPACE --timeout=300s
-    
-    # Cleanup temp file
-    Remove-Item k8s/production/backend-deployment-temp.yaml
-    
-    Write-Host "✅ Backend deployed" -ForegroundColor Green
-}
-
-# Function to deploy frontend
-function Deploy-Frontend {
-    Write-Host "🎨 Deploying frontend..." -ForegroundColor Blue
-    
-    # Update image tag in deployment
-    $content = Get-Content k8s/production/frontend-deployment.yaml
-    $content = $content -replace ":latest", ":$ImageTag"
-    $content | Set-Content k8s/production/frontend-deployment-temp.yaml
-    
-    kubectl apply -f k8s/production/frontend-deployment-temp.yaml
-    
-    # Wait for frontend to be ready
-    Write-Host "Waiting for frontend to be ready..."
-    kubectl wait --for=condition=available deployment/frontend -n $NAMESPACE --timeout=300s
-    
-    # Cleanup temp file
-    Remove-Item k8s/production/frontend-deployment-temp.yaml
-    
-    Write-Host "✅ Frontend deployed" -ForegroundColor Green
-}
-
-# Function to run health checks
-function Test-HealthChecks {
-    Write-Host "🏥 Running health checks..." -ForegroundColor Blue
-    
-    # Wait for services to stabilize
+    Write-Log "Waiting for database to be ready..."
     Start-Sleep -Seconds 30
     
-    try {
-        # Get ingress URLs
-        $backendUrl = kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[1].host}'
-        $frontendUrl = kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[0].host}'
-        
-        # Check backend health
-        $response = Invoke-WebRequest -Uri "https://$backendUrl/health" -UseBasicParsing
-        if ($response.StatusCode -eq 200) {
-            Write-Host "✅ Backend health check passed" -ForegroundColor Green
-        }
-        
-        # Check frontend health
-        $response = Invoke-WebRequest -Uri "https://$frontendUrl/api/health" -UseBasicParsing
-        if ($response.StatusCode -eq 200) {
-            Write-Host "✅ Frontend health check passed" -ForegroundColor Green
-        }
-        
-        Write-Host "✅ All health checks passed" -ForegroundColor Green
+    # Run migrations
+    docker-compose -f docker-compose.prod.yml run --rm backend npm run prisma:migrate:deploy
+    if ($LASTEXITCODE -ne 0) {
+        throw "Database migrations failed"
     }
-    catch {
-        Write-Host "❌ Health check failed: $($_.Exception.Message)" -ForegroundColor Red
-        throw
-    }
+    
+    Write-Success "Database migrations completed"
 }
 
-# Function to display summary
-function Show-DeploymentSummary {
-    Write-Host "🎉 Deployment Summary" -ForegroundColor Green
-    Write-Host "===================" -ForegroundColor Blue
+# Deploy services
+function Deploy-Services {
+    Write-Log "Deploying services..."
     
-    kubectl get pods -n $NAMESPACE
-    Write-Host ""
-    kubectl get services -n $NAMESPACE
-    Write-Host ""
-    kubectl get ingress -n $NAMESPACE
+    # Set environment variables
+    $env:VERSION = $Version
+    $env:PROJECT_NAME = $ProjectName
     
-    $backendUrl = kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[1].host}'
-    $frontendUrl = kubectl get ingress ai-interview-ingress -n $NAMESPACE -o jsonpath='{.spec.rules[0].host}'
+    # Deploy with docker-compose
+    docker-compose -f docker-compose.prod.yml up -d
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to deploy services"
+    }
     
-    Write-Host "🌐 Application URLs:" -ForegroundColor Green
-    Write-Host "Frontend: https://$frontendUrl"
-    Write-Host "Backend API: https://$backendUrl"
-    Write-Host "Monitoring: http://your-monitoring-url:3001"
+    Write-Success "Services deployed"
+}
+
+# Health check
+function Test-Health {
+    Write-Log "Performing health checks..."
     
-    Write-Host "✅ Production deployment completed successfully!" -ForegroundColor Green
+    # Wait for services to start
+    Start-Sleep -Seconds 60
+    
+    # Check backend health
+    try {
+        $response = Invoke-WebRequest -Uri "http://localhost:4000/health" -UseBasicParsing -TimeoutSec 10
+        if ($response.StatusCode -eq 200) {
+            Write-Success "Backend health check passed"
+        }
+        else {
+            throw "Backend returned status code: $($response.StatusCode)"
+        }
+    }
+    catch {
+        Write-Error-Log "Backend health check failed: $_"
+        return $false
+    }
+    
+    # Check frontend health
+    try {
+        $response = Invoke-WebRequest -Uri "http://localhost:3000/api/health" -UseBasicParsing -TimeoutSec 10
+        if ($response.StatusCode -eq 200) {
+            Write-Success "Frontend health check passed"
+        }
+        else {
+            throw "Frontend returned status code: $($response.StatusCode)"
+        }
+    }
+    catch {
+        Write-Error-Log "Frontend health check failed: $_"
+        return $false
+    }
+    
+    Write-Success "All health checks passed"
+    return $true
+}
+
+# Cleanup old images
+function Remove-OldImages {
+    Write-Log "Cleaning up old images..."
+    
+    # Remove dangling images
+    docker image prune -f
+    
+    Write-Success "Cleanup completed"
+}
+
+# Backup current deployment
+function Backup-Current {
+    Write-Log "Creating backup of current deployment..."
+    
+    $backupDir = "C:\var\backups\ai-interview\$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    
+    # Backup database
+    $postgresUser = [Environment]::GetEnvironmentVariable("POSTGRES_USER")
+    $postgresDb = [Environment]::GetEnvironmentVariable("POSTGRES_DB")
+    
+    if ($postgresUser -and $postgresDb) {
+        docker-compose -f docker-compose.prod.yml exec -T postgres pg_dump -U $postgresUser $postgresDb | Out-File -FilePath "$backupDir\database.sql" -Encoding UTF8
+    }
+    
+    # Backup uploaded files
+    if (Test-Path "C:\var\lib\ai-interview\uploads") {
+        Copy-Item -Path "C:\var\lib\ai-interview\uploads" -Destination "$backupDir\" -Recurse -Force
+    }
+    
+    # Backup configuration
+    Copy-Item -Path ".env.production" -Destination "$backupDir\" -Force
+    Copy-Item -Path "docker-compose.prod.yml" -Destination "$backupDir\" -Force
+    
+    Write-Success "Backup created at $backupDir"
+}
+
+# Rollback function
+function Invoke-Rollback {
+    Write-Error-Log "Deployment failed. Rolling back..."
+    
+    # Stop current services
+    docker-compose -f docker-compose.prod.yml down
+    
+    # Find latest backup
+    $backupDirs = Get-ChildItem -Path "C:\var\backups\ai-interview" -Directory | Where-Object { $_.Name -match "^\d{8}_\d{6}$" } | Sort-Object Name -Descending
+    
+    if ($backupDirs.Count -gt 0) {
+        $latestBackup = $backupDirs[0].FullName
+        Write-Log "Restoring from backup: $latestBackup"
+        
+        # Restore database
+        if (Test-Path "$latestBackup\database.sql") {
+            docker-compose -f docker-compose.prod.yml up -d postgres
+            Start-Sleep -Seconds 30
+            Get-Content "$latestBackup\database.sql" | docker-compose -f docker-compose.prod.yml exec -T postgres psql -U $env:POSTGRES_USER $env:POSTGRES_DB
+        }
+        
+        # Restore configuration
+        if (Test-Path "$latestBackup\.env.production") {
+            Copy-Item -Path "$latestBackup\.env.production" -Destination ".env.production" -Force
+        }
+        
+        # Start services with previous configuration
+        docker-compose -f docker-compose.prod.yml up -d
+    }
+    
+    Write-Error-Log "Rollback completed"
+    exit 1
 }
 
 # Main deployment function
 function Start-Deployment {
+    Write-Log "Starting production deployment for $ProjectName version $Version"
+    
     try {
         Test-Prerequisites
-        New-Namespace
-        Deploy-Secrets
-        Build-AndPushImages
-        Deploy-Database
-        Deploy-Redis
-        Deploy-Backend
-        Deploy-Frontend
-        kubectl apply -f k8s/production/ingress.yaml
-        Test-HealthChecks
-        Show-DeploymentSummary
+        Test-Environment
+        New-Directories
+        Set-SSL
+        Backup-Current
+        Build-Images
+        Push-Images
+        Invoke-Migrations
+        Deploy-Services
+        
+        if (Test-Health) {
+            Remove-OldImages
+            Write-Success "Deployment completed successfully!"
+            Write-Log "Application is available at:"
+            Write-Log "  - Frontend: https://yourdomain.com"
+            Write-Log "  - API: https://api.yourdomain.com"
+            Write-Log "  - Health: https://api.yourdomain.com/health"
+        }
+        else {
+            Invoke-Rollback
+        }
     }
     catch {
-        Write-Host "❌ Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "🔄 Consider running rollback..." -ForegroundColor Yellow
-        exit 1
+        Write-Error-Log "Deployment failed: $_"
+        Invoke-Rollback
     }
 }
 
-# Function to rollback
-function Start-Rollback {
-    Write-Host "🔄 Rolling back deployment..." -ForegroundColor Yellow
-    
-    kubectl rollout undo deployment/backend -n $NAMESPACE
-    kubectl rollout undo deployment/frontend -n $NAMESPACE
-    
-    Write-Host "✅ Rollback completed" -ForegroundColor Green
+# Handle command line arguments
+if ($Help) {
+    Show-Usage
+    exit 0
 }
 
-# Execute based on action
-switch ($Action) {
-    "deploy" { Start-Deployment }
-    "rollback" { Start-Rollback }
-    "health-check" { Test-HealthChecks }
-    default {
-        Write-Host "Usage: .\deploy-production.ps1 [-ImageTag <tag>] [-Action <deploy|rollback|health-check>]"
-        Write-Host "  ImageTag: Docker image tag to deploy (default: latest)"
-        Write-Host "  Action: deploy (default), rollback, health-check"
-        exit 1
-    }
-}
+# Start deployment
+Start-Deployment
