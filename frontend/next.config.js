@@ -5,9 +5,14 @@ const nextConfig = {
   },
   typescript: {
     ignoreBuildErrors: false,
+    tsconfigPath: './tsconfig.json',
   },
   eslint: {
     ignoreDuringBuilds: false,
+  },
+  compiler: {
+    // Remove console logs in production
+    removeConsole: process.env.NODE_ENV === 'production',
   },
   env: {
     CUSTOM_KEY: process.env.CUSTOM_KEY,
