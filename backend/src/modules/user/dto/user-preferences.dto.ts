@@ -1,8 +1,9 @@
-import { IsString, IsBoolean, IsOptional } from 'class-validator';
+import { IsOptional, IsBoolean, IsString, IsIn } from 'class-validator';
 
 export class UpdateUserPreferencesDto {
   @IsOptional()
   @IsString()
+  @IsIn(['en', 'es', 'fr', 'de', 'it', 'pt', 'ja', 'ko', 'zh'])
   language?: string;
 
   @IsOptional()
@@ -31,10 +32,12 @@ export class UpdateUserPreferencesDto {
 
   @IsOptional()
   @IsString()
+  @IsIn(['light', 'dark', 'system'])
   theme?: string;
 
   @IsOptional()
   @IsString()
+  @IsIn(['high', 'medium', 'low'])
   audioQuality?: string;
 
   @IsOptional()
@@ -62,4 +65,19 @@ export class UserPreferencesResponseDto {
   showConfidenceScores: boolean;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export class AccountDeletionRequestDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @IsOptional()
+  @IsString()
+  feedback?: string;
+}
+
+export class ScheduleDeletionDto {
+  @IsString()
+  deletionDate: string;
 }

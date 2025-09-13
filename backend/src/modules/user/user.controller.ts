@@ -3,14 +3,19 @@ import {
   Get, 
   Put, 
   Delete, 
+  Post,
   Body, 
   UseGuards, 
   HttpCode, 
-  HttpStatus 
+  HttpStatus,
+  Req,
+  Query
 } from '@nestjs/common';
+import { Request } from 'express';
 import { UserService } from './user.service';
 import { UserProfileService } from './user-profile.service';
 import { UserPreferencesService } from './services/user-preferences.service';
+import { AccountDeletionService } from './services/account-deletion.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { 
@@ -29,6 +34,7 @@ export class UserController {
     private readonly userService: UserService,
     private readonly userProfileService: UserProfileService,
     private readonly userPreferencesService: UserPreferencesService,
+    private readonly accountDeletionService: AccountDeletionService,
   ) {}
 
   @Get('me')
@@ -93,5 +99,67 @@ export class UserController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async resetUserPreferences(@CurrentUser() user: any): Promise<UserPreferencesResponseDto> {
     return this.userPreferencesService.resetUserPreferences(user.id);
+  }
+
+  // Account deletion endpoints
+  @Post('me/delete-account')
+  async requestAccountDeletion(
+    @CurrentUser() user: any,
+    @Body() body: { reason?: string; feedback?: string },
+    @Req() req: Request,
+  ) {
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const userAgent = req.get('User-Agent');
+
+    return this.accountDeletionService.requestAccountDeletion({
+      userId: user.id,
+      reason: body.reason,
+      feedback: body.feedback,
+      ipAddress,
+      userAgent,
+    });
+  }
+
+  @Post('me/schedule-deletion')
+  async scheduleAccountDeletion(
+    @CurrentUser() user: any,
+    @Body() body: { deletionDate: string },
+  ) {
+    const deletionDate = new Date(body.deletionDate);
+    await this.accountDeletionService.scheduleAccountDeletion(user.id, deletionDate);
+    return { success: true, message: 'Account deletion scheduled' };
+  }
+
+  @Post('me/cancel-deletion')
+  async cancelAccountDeletion(@CurrentUser() user: any) {
+    await this.accountDeletionService.cancelAccountDeletion(user.id);
+    return { success: true, message: 'Account deletion cancelled' };
+  }
+
+  // Settings export endpoint
+  @Get('me/export-settings')
+  async exportUserSettings(@CurrentUser() user: any) {
+    const [userInfo, profile, preferences] = await Promise.all([
+      this.userService.findById(user.id),
+      this.userProfileService.findByUserId(user.id),
+      this.userPreferencesService.getUserPreferences(user.id),
+    ]);
+
+    return {
+      user: userInfo,
+      profile,
+      preferences,
+      exportedAt: new Date(),
+    };
+  }
+
+  // Preferences statistics (for admin or analytics)
+  @Get('preferences/stats')
+  async getPreferencesStats(@Query('admin') isAdmin?: string) {
+    // In a real app, you'd check admin permissions here
+    if (isAdmin === 'true') {
+      return this.userPreferencesService.getPreferencesStats();
+    }
+    throw new Error('Unauthorized');
   }
 }
