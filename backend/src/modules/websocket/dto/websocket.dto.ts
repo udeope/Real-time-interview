@@ -22,11 +22,30 @@ export class AudioChunkDto {
   sampleRate?: number;
 
   @IsOptional()
+  @IsNumber()
+  channels?: number;
+
+  @IsOptional()
+  @IsNumber()
+  chunkIndex?: number;
+
+  @IsOptional()
+  @IsNumber()
+  duration?: number;
+
+  @IsOptional()
   @IsDateString()
   timestamp?: string;
 }
 
 export class TranscriptionResultDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  sessionId: string;
+
   @IsString()
   text: string;
 
@@ -34,8 +53,7 @@ export class TranscriptionResultDto {
   confidence: number;
 
   @IsString()
-  @IsEnum(['partial', 'final'])
-  status: 'partial' | 'final';
+  language: string;
 
   @IsOptional()
   @IsString()
@@ -44,6 +62,20 @@ export class TranscriptionResultDto {
   @IsOptional()
   @IsString()
   speakerId?: string;
+
+  @IsOptional()
+  @IsString()
+  audioChunkId?: string;
+
+  @IsOptional()
+  @IsString()
+  provider?: string;
+
+  @IsOptional()
+  isPartial?: boolean;
+
+  @IsOptional()
+  metadata?: any;
 
   @IsDateString()
   timestamp: string;

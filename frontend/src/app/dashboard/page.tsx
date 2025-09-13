@@ -5,6 +5,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { useAuth } from '@/hooks/useAuth';
 import { 
   Mic, 
   BookOpen, 
@@ -16,12 +18,6 @@ import {
   Settings
 } from 'lucide-react';
 import Link from 'next/link';
-
-// Mock data - replace with actual API calls
-const mockUser = {
-  name: 'John Doe',
-  email: 'john.doe@example.com'
-};
 
 const mockStats = {
   totalSessions: 12,
@@ -60,18 +56,14 @@ const mockRecentSessions = [
   }
 ];
 
-export default function DashboardPage() {
+function DashboardContent() {
+  const { user, logout } = useAuth();
   const [processingStatus, setProcessingStatus] = useState({
     isListening: false,
     isTranscribing: false,
     isGeneratingResponse: false,
     lastUpdate: new Date()
   });
-
-  const handleLogout = () => {
-    localStorage.removeItem('authToken');
-    window.location.href = '/login';
-  };
 
   const getScoreColor = (score: number) => {
     if (score >= 90) return 'text-green-600 bg-green-50';
@@ -82,14 +74,14 @@ export default function DashboardPage() {
 
   return (
     <MainLayout
-      user={mockUser}
+      user={user}
       processingStatus={processingStatus}
-      onLogout={handleLogout}
+      onLogout={logout}
     >
       <div className="space-y-6">
         {/* Welcome Section */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg p-6 text-white">
-          <h1 className="text-2xl font-bold mb-2">Welcome back, {mockUser.name}!</h1>
+          <h1 className="text-2xl font-bold mb-2">Welcome back, {user?.name}!</h1>
           <p className="text-blue-100 mb-4">
             Ready to ace your next interview? Let's get started with some practice or jump into a live session.
           </p>
@@ -253,5 +245,13 @@ export default function DashboardPage() {
         </div>
       </div>
     </MainLayout>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
   );
 }

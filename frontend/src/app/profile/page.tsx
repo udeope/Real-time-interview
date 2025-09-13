@@ -5,6 +5,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { useAuth } from '@/hooks/useAuth';
 import { 
   User, 
   Mail, 
@@ -15,12 +17,6 @@ import {
   Save,
   X
 } from 'lucide-react';
-
-// Mock data
-const mockUser = {
-  name: 'John Doe',
-  email: 'john.doe@example.com'
-};
 
 const mockProfile = {
   name: 'John Doe',
@@ -54,15 +50,11 @@ const mockProfile = {
   ]
 };
 
-export default function ProfilePage() {
+function ProfileContent() {
+  const { user, logout } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editingExperience, setEditingExperience] = useState<string | null>(null);
   const [editingSkill, setEditingSkill] = useState<string | null>(null);
-
-  const handleLogout = () => {
-    localStorage.removeItem('authToken');
-    window.location.href = '/login';
-  };
 
   const getSeniorityColor = (seniority: string) => {
     switch (seniority.toLowerCase()) {
@@ -96,8 +88,8 @@ export default function ProfilePage() {
 
   return (
     <MainLayout
-      user={mockUser}
-      onLogout={handleLogout}
+      user={user}
+      onLogout={logout}
     >
       <div className="space-y-6">
         {/* Header */}
@@ -324,5 +316,13 @@ export default function ProfilePage() {
         </Card>
       </div>
     </MainLayout>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <ProtectedRoute>
+      <ProfileContent />
+    </ProtectedRoute>
   );
 }

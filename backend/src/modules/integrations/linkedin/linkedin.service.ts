@@ -2,7 +2,9 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { IntegrationType } from '@prisma/client';
 import { UserProfileAnalysisService } from '../../context-analysis/services/user-profile-analysis.service';
+import { IntegrationRepository } from '../repositories/integration.repository';
 
 export interface LinkedInProfile {
   id: string;
@@ -47,6 +49,7 @@ export class LinkedInService {
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
     private readonly userProfileService: UserProfileAnalysisService,
+    private readonly integrationRepository: IntegrationRepository,
   ) {}
 
   async getAuthUrl(state: string): Promise<string> {
@@ -146,38 +149,134 @@ export class LinkedInService {
     }
   }
 
-  async syncUserProfile(userId: string, accessToken: string): Promise<void> {
-    const linkedInProfile = await this.getProfile(accessToken);
+  async connectLinkedIn(userId: string, code: string): Promise<void> {
+    try {
+      const accessToken = await this.exchangeCodeForToken(code);
+      const linkedInProfile = await this.getProfile(accessToken);
+
+      // Store integration in database
+      await this.integrationRepository.createIntegration({
+        userId,
+        integrationType: IntegrationType.LINKEDIN,
+        providerUserId: linkedInProfile.id,
+        accessToken,
+        scopes: ['r_liteprofile', 'r_emailaddress', 'r_basicprofile'],
+        syncData: {
+          profileId: linkedInProfile.id,
+          firstName: linkedInProfile.firstName,
+          lastName: linkedInProfile.lastName,
+          headline: linkedInProfile.headline,
+        },
+      });
+
+      // Sync profile data
+      await this.syncUserProfile(userId, accessToken);
+
+      this.logger.log(`Successfully connected LinkedIn for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to connect LinkedIn for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async disconnectLinkedIn(userId: string): Promise<void> {
+    try {
+      await this.integrationRepository.deactivateIntegration(
+        userId,
+        IntegrationType.LINKEDIN,
+      );
+      this.logger.log(`Successfully disconnected LinkedIn for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to disconnect LinkedIn for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async getLinkedInIntegration(userId: string) {
+    return this.integrationRepository.findIntegrationByUserAndType(
+      userId,
+      IntegrationType.LINKEDIN,
+    );
+  }
+
+  async syncUserProfile(userId: string, accessToken?: string): Promise<void> {
+    try {
+      let token = accessToken;
+      
+      if (!token) {
+        const integration = await this.getLinkedInIntegration(userId);
+        if (!integration || !integration.isActive) {
+          throw new BadRequestException('LinkedIn integration not found or inactive');
+        }
+        token = integration.accessToken;
+      }
+
+      const linkedInProfile = await this.getProfile(token);
+      
+      // Extract experience from LinkedIn positions
+      const experience = linkedInProfile.positions.map(position => ({
+        company: position.companyName,
+        role: position.title,
+        duration: this.formatDuration(position.startDate, position.endDate),
+        achievements: position.description ? [position.description] : [],
+        technologies: this.extractTechnologies(position.description || ''),
+      }));
+
+      // Extract skills
+      const skills = linkedInProfile.skills.map(skill => ({
+        name: skill.name,
+        level: this.mapEndorsementCountToLevel(skill.endorsementCount),
+        category: 'professional', // Could be enhanced with skill categorization
+      }));
+
+      // Determine seniority based on experience
+      const seniority = this.determineSeniority(linkedInProfile.positions);
+
+      // Update user profile
+      await this.userProfileService.updateProfile(userId, {
+        experience,
+        skills,
+        seniority,
+        linkedInId: linkedInProfile.id,
+        lastLinkedInSync: new Date(),
+      });
+
+      // Update integration sync status
+      await this.integrationRepository.updateLastSync(
+        userId,
+        IntegrationType.LINKEDIN,
+        {
+          profileId: linkedInProfile.id,
+          positionsCount: linkedInProfile.positions.length,
+          skillsCount: linkedInProfile.skills.length,
+          lastSyncedAt: new Date(),
+        },
+      );
+
+      this.logger.log(`Successfully synced LinkedIn profile for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync LinkedIn profile for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async getLinkedInStatus(userId: string): Promise<any> {
+    const integration = await this.getLinkedInIntegration(userId);
     
-    // Extract experience from LinkedIn positions
-    const experience = linkedInProfile.positions.map(position => ({
-      company: position.companyName,
-      role: position.title,
-      duration: this.formatDuration(position.startDate, position.endDate),
-      achievements: position.description ? [position.description] : [],
-      technologies: this.extractTechnologies(position.description || ''),
-    }));
+    if (!integration) {
+      return {
+        connected: false,
+        status: 'not_connected',
+      };
+    }
 
-    // Extract skills
-    const skills = linkedInProfile.skills.map(skill => ({
-      name: skill.name,
-      level: this.mapEndorsementCountToLevel(skill.endorsementCount),
-      category: 'professional', // Could be enhanced with skill categorization
-    }));
-
-    // Determine seniority based on experience
-    const seniority = this.determineSeniority(linkedInProfile.positions);
-
-    // Update user profile
-    await this.userProfileService.updateProfile(userId, {
-      experience,
-      skills,
-      seniority,
-      linkedInId: linkedInProfile.id,
-      lastLinkedInSync: new Date(),
-    });
-
-    this.logger.log(`Successfully synced LinkedIn profile for user ${userId}`);
+    return {
+      connected: integration.isActive,
+      status: integration.isActive ? 'connected' : 'disconnected',
+      lastSync: integration.lastSync,
+      syncData: integration.syncData,
+      connectedAt: integration.createdAt,
+    };
   }
 
   private mapPositions(positions: any[]): LinkedInPosition[] {

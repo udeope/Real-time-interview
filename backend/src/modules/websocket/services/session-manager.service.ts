@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Socket } from 'socket.io';
+import { Subject } from 'rxjs';
 
 interface SessionConnection {
   socketId: string;
@@ -13,6 +14,7 @@ interface SessionRoom {
   connections: Map<string, SessionConnection>;
   createdAt: Date;
   lastActivity: Date;
+  audioStream?: Subject<Buffer>;
 }
 
 @Injectable()
@@ -172,9 +174,76 @@ export class SessionManagerService {
     
     for (const [sessionId, session] of this.sessions.entries()) {
       if (session.lastActivity < cutoff && session.connections.size === 0) {
+        // Clean up audio stream if exists
+        if (session.audioStream) {
+          session.audioStream.complete();
+        }
         this.sessions.delete(sessionId);
         this.logger.log(`Cleaned up inactive session: ${sessionId}`);
       }
     }
+  }
+
+  /**
+   * Set audio stream for a session
+   */
+  setSessionAudioStream(sessionId: string, audioStream: Subject<Buffer>): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      // Complete existing stream if any
+      if (session.audioStream) {
+        session.audioStream.complete();
+      }
+      session.audioStream = audioStream;
+      this.logger.log(`Audio stream set for session: ${sessionId}`);
+    } else {
+      this.logger.warn(`Attempted to set audio stream for non-existent session: ${sessionId}`);
+    }
+  }
+
+  /**
+   * Get audio stream for a session
+   */
+  getSessionAudioStream(sessionId: string): Subject<Buffer> | null {
+    const session = this.sessions.get(sessionId);
+    return session?.audioStream || null;
+  }
+
+  /**
+   * Stop audio stream for a session
+   */
+  stopSessionAudioStream(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session?.audioStream) {
+      session.audioStream.complete();
+      session.audioStream = undefined;
+      this.logger.log(`Audio stream stopped for session: ${sessionId}`);
+    }
+  }
+
+  /**
+   * Add audio chunk to session stream
+   */
+  addAudioChunkToStream(sessionId: string, audioBuffer: Buffer): boolean {
+    const session = this.sessions.get(sessionId);
+    if (session?.audioStream) {
+      try {
+        session.audioStream.next(audioBuffer);
+        session.lastActivity = new Date();
+        return true;
+      } catch (error) {
+        this.logger.error(`Error adding audio chunk to stream for session ${sessionId}:`, error);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if session has active audio stream
+   */
+  hasActiveAudioStream(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    return !!(session?.audioStream && !session.audioStream.closed);
   }
 }

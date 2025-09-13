@@ -72,11 +72,50 @@ The WebSocket gateway provides real-time communication capabilities for the AI I
 - `transcription:request` - Request transcription for audio
 - `transcription:result` - Transcription result (partial or final)
 - `transcription:processing` - Transcription in progress
+- `transcription:completed` - Transcription request completed
 - `transcription:error` - Transcription processing errors
+- `transcription:start` - Start real-time transcription for session
+- `transcription:started` - Real-time transcription has started
+- `transcription:stop` - Stop real-time transcription for session
+- `transcription:stopped` - Real-time transcription has stopped
+- `transcription:processing:error` - Error during transcription processing
 
 ### Response Events
 
 - `responses:suggestions` - AI-generated response suggestions
+
+## Real-time Transcription Integration
+
+The WebSocket gateway integrates with the transcription service to provide real-time audio processing:
+
+### Audio Streaming Modes
+
+1. **Individual Chunk Processing**: Each audio chunk is processed separately
+   - Use `audio:stream` or `transcription:request` events
+   - Suitable for on-demand transcription
+   - Lower resource usage
+
+2. **Real-time Stream Processing**: Continuous audio stream processing
+   - Use `transcription:start` to begin streaming
+   - Send audio via `audio:stream` events
+   - Use `transcription:stop` to end streaming
+   - Higher accuracy for continuous speech
+
+### Integration Flow
+
+1. **Session Setup**: Client joins a session room
+2. **Transcription Start**: Optional real-time transcription activation
+3. **Audio Streaming**: Clients send audio chunks via WebSocket
+4. **Processing**: Audio is processed by the transcription service
+5. **Result Broadcasting**: Transcription results are broadcast to all session participants
+6. **Error Handling**: Comprehensive error handling with fallback mechanisms
+
+### Performance Optimizations
+
+- **Stream Deduplication**: Prevents duplicate processing when real-time stream is active
+- **Automatic Cleanup**: Stops transcription when all users leave a session
+- **Fallback Providers**: Automatic fallback between Google Speech and Whisper
+- **Timeout Handling**: 10-second timeout for transcription requests
 
 ## Authentication
 
@@ -137,7 +176,7 @@ function InterviewComponent() {
 ### Frontend - Audio Streaming
 
 ```typescript
-const { streamAudio, requestTranscription } = useWebSocket();
+const { streamAudio, requestTranscription, startTranscription, stopTranscription } = useWebSocket();
 
 // Stream audio chunk
 const audioChunk = {
@@ -146,8 +185,21 @@ const audioChunk = {
   sampleRate: 44100,
 };
 
+// Individual transcription request
 streamAudio(audioChunk);
 requestTranscription(audioChunk);
+
+// Real-time transcription
+startTranscription({
+  language: 'en-US',
+  enableSpeakerDiarization: true,
+});
+
+// Send audio to real-time stream
+streamAudio(audioChunk);
+
+// Stop real-time transcription
+stopTranscription();
 ```
 
 ## Error Handling
@@ -175,6 +227,12 @@ The WebSocket implementation includes comprehensive error handling:
 
 - Use the `WebSocketTest` component for manual testing
 - Located in `frontend/src/components/WebSocketTest.tsx`
+
+### Transcription Integration Testing
+
+- `test-websocket-transcription.js` - Automated integration test script
+- `test-websocket-transcription.ps1` - PowerShell wrapper for Windows
+- Run with: `node scripts/test-websocket-transcription.js`
 
 ## Configuration
 

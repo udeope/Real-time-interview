@@ -255,6 +255,170 @@ describe('WebSocket Gateway (e2e)', () => {
     });
   });
 
+  describe('Real-time Transcription', () => {
+    const sessionId = 'realtime-transcription-session';
+
+    beforeEach((done) => {
+      clientSocket.on('connection:success', () => {
+        clientSocket.emit('session:join', { sessionId });
+      });
+
+      clientSocket.on('session:joined', () => {
+        done();
+      });
+    });
+
+    it('should start and stop real-time transcription', (done) => {
+      let transcriptionStarted = false;
+
+      clientSocket.on('transcription:started', (data) => {
+        expect(data.sessionId).toBe(sessionId);
+        expect(data.userId).toBe(testUser.id);
+        transcriptionStarted = true;
+        
+        // Stop transcription
+        clientSocket.emit('transcription:stop');
+      });
+
+      clientSocket.on('transcription:stopped', (data) => {
+        expect(transcriptionStarted).toBe(true);
+        expect(data.sessionId).toBe(sessionId);
+        expect(data.userId).toBe(testUser.id);
+        done();
+      });
+
+      clientSocket.on('transcription:error', (error) => {
+        done(new Error(`Transcription error: ${error.message}`));
+      });
+
+      // Start real-time transcription
+      clientSocket.emit('transcription:start', {
+        language: 'en-US',
+        enableSpeakerDiarization: true,
+      });
+    });
+
+    it('should receive transcription results during real-time session', (done) => {
+      let transcriptionStarted = false;
+      let resultReceived = false;
+
+      clientSocket.on('transcription:started', () => {
+        transcriptionStarted = true;
+        
+        // Send audio data to trigger transcription
+        const audioData = {
+          audioData: Buffer.from('mock-audio-data').toString('base64'),
+          format: 'webm',
+          sampleRate: 16000,
+          channels: 1,
+        };
+        
+        clientSocket.emit('audio:stream', audioData);
+      });
+
+      clientSocket.on('transcription:result', (result) => {
+        expect(transcriptionStarted).toBe(true);
+        expect(result.sessionId).toBe(sessionId);
+        expect(result.text).toBeDefined();
+        expect(result.confidence).toBeDefined();
+        expect(result.metadata.processingMode).toBe('realtime');
+        
+        resultReceived = true;
+        
+        // Stop transcription
+        clientSocket.emit('transcription:stop');
+      });
+
+      clientSocket.on('transcription:stopped', () => {
+        if (transcriptionStarted && resultReceived) {
+          done();
+        }
+      });
+
+      clientSocket.on('transcription:error', (error) => {
+        done(new Error(`Transcription error: ${error.message}`));
+      });
+
+      // Start real-time transcription
+      clientSocket.emit('transcription:start');
+    });
+
+    it('should handle multiple clients receiving same transcription results', (done) => {
+      // Create second client
+      const secondSocket = io(`http://localhost:3001/interview`, {
+        auth: {
+          token: authToken,
+        },
+        transports: ['websocket'],
+      });
+
+      let firstClientResult = false;
+      let secondClientResult = false;
+
+      secondSocket.on('connection:success', () => {
+        secondSocket.emit('session:join', { sessionId });
+      });
+
+      secondSocket.on('session:joined', () => {
+        // Start transcription from first client
+        clientSocket.emit('transcription:start');
+      });
+
+      clientSocket.on('transcription:result', (result) => {
+        expect(result.sessionId).toBe(sessionId);
+        firstClientResult = true;
+        
+        if (firstClientResult && secondClientResult) {
+          secondSocket.disconnect();
+          clientSocket.emit('transcription:stop');
+          done();
+        }
+      });
+
+      secondSocket.on('transcription:result', (result) => {
+        expect(result.sessionId).toBe(sessionId);
+        secondClientResult = true;
+        
+        if (firstClientResult && secondClientResult) {
+          secondSocket.disconnect();
+          clientSocket.emit('transcription:stop');
+          done();
+        }
+      });
+
+      clientSocket.on('transcription:started', () => {
+        // Send audio to trigger transcription
+        const audioData = {
+          audioData: Buffer.from('test-audio-for-multiple-clients').toString('base64'),
+          format: 'webm',
+        };
+        
+        clientSocket.emit('audio:stream', audioData);
+      });
+    });
+
+    it('should handle transcription errors gracefully', (done) => {
+      clientSocket.on('transcription:started', () => {
+        // Send invalid audio data to trigger error
+        const invalidAudioData = {
+          audioData: 'invalid-base64-data',
+          format: 'invalid-format',
+        };
+        
+        clientSocket.emit('audio:stream', invalidAudioData);
+      });
+
+      clientSocket.on('transcription:processing:error', (error) => {
+        expect(error.sessionId).toBe(sessionId);
+        expect(error.error).toBeDefined();
+        done();
+      });
+
+      // Start transcription
+      clientSocket.emit('transcription:start');
+    });
+  });
+
   describe('Session Status Updates', () => {
     const sessionId = 'status-test-session';
 

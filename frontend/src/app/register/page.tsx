@@ -1,52 +1,49 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { RegisterForm } from '@/components/auth/RegisterForm';
+import { useAuth } from '@/hooks/useAuth';
+import { AuthLoading } from '@/components/auth/AuthLoading';
 
 export default function RegisterPage() {
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { register, isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && !authLoading) {
+      router.push('/dashboard');
+    }
+  }, [isAuthenticated, authLoading, router]);
+
   const handleRegister = async (data: { name: string; email: string; password: string }) => {
-    setIsLoading(true);
     setError(null);
 
     try {
-      // TODO: Implement actual registration logic
-      // This is a placeholder for the authentication service
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Registration failed');
-      }
-
-      const result = await response.json();
-      
-      // Store authentication token (implement proper token management)
-      localStorage.setItem('authToken', result.token);
-      
-      // Redirect to dashboard
+      await register(data);
+      // Redirect will happen automatically via useEffect
       router.push('/dashboard');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'An unexpected error occurred');
-    } finally {
-      setIsLoading(false);
     }
   };
+
+  // Show loading while checking authentication status
+  if (authLoading) {
+    return <AuthLoading message="Checking authentication..." />;
+  }
+
+  // Don't render register form if already authenticated
+  if (isAuthenticated) {
+    return <AuthLoading message="Redirecting to dashboard..." />;
+  }
 
   return (
     <RegisterForm
       onSubmit={handleRegister}
-      isLoading={isLoading}
+      isLoading={authLoading}
       error={error || undefined}
     />
   );

@@ -2,6 +2,8 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { IntegrationType } from '@prisma/client';
+import { IntegrationRepository } from '../repositories/integration.repository';
 
 export interface VideoConferencingMeeting {
   id: string;
@@ -40,6 +42,7 @@ export class VideoConferencingService {
   constructor(
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
+    private readonly integrationRepository: IntegrationRepository,
   ) {}
 
   // Zoom Integration
@@ -236,28 +239,286 @@ export class VideoConferencingService {
     }
   }
 
-  // Utility methods for detecting interview context
-  async detectInterviewMeetings(userId: string): Promise<VideoConferencingMeeting[]> {
-    const integrations = await this.getUserVideoIntegrations(userId);
-    const allMeetings: VideoConferencingMeeting[] = [];
-
-    for (const integration of integrations) {
-      let meetings: VideoConferencingMeeting[] = [];
+  // Connection Methods
+  async connectZoom(userId: string, code: string): Promise<void> {
+    try {
+      const integration = await this.exchangeZoomCodeForToken(code);
       
-      if (integration.platform === 'zoom') {
-        meetings = await this.getZoomMeetings(integration.accessToken);
-      } else if (integration.platform === 'teams') {
-        meetings = await this.getTeamsMeetings(integration.accessToken);
-      } else if (integration.platform === 'meet') {
-        meetings = await this.getMeetMeetings(integration.accessToken);
-      }
+      await this.integrationRepository.createIntegration({
+        userId,
+        integrationType: IntegrationType.ZOOM,
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+        scopes: ['meeting:read'],
+      });
 
-      // Filter for interview-related meetings
-      const interviewMeetings = meetings.filter(meeting => this.isInterviewMeeting(meeting));
-      allMeetings.push(...interviewMeetings);
+      // Initial sync
+      await this.syncZoomMeetings(userId);
+
+      this.logger.log(`Successfully connected Zoom for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to connect Zoom for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async connectTeams(userId: string, code: string): Promise<void> {
+    try {
+      const integration = await this.exchangeTeamsCodeForToken(code);
+      
+      await this.integrationRepository.createIntegration({
+        userId,
+        integrationType: IntegrationType.TEAMS,
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+        scopes: ['https://graph.microsoft.com/OnlineMeetings.Read'],
+      });
+
+      // Initial sync
+      await this.syncTeamsMeetings(userId);
+
+      this.logger.log(`Successfully connected Teams for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to connect Teams for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async connectGoogleMeet(userId: string, code: string): Promise<void> {
+    try {
+      // Google Meet uses Calendar API integration
+      const integration = await this.exchangeGoogleCodeForToken(code);
+      
+      await this.integrationRepository.createIntegration({
+        userId,
+        integrationType: IntegrationType.GOOGLE_MEET,
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+      });
+
+      // Initial sync
+      await this.syncGoogleMeetMeetings(userId);
+
+      this.logger.log(`Successfully connected Google Meet for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to connect Google Meet for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  // Sync Methods
+  async syncZoomMeetings(userId: string): Promise<void> {
+    const integration = await this.integrationRepository.findIntegrationByUserAndType(
+      userId,
+      IntegrationType.ZOOM,
+    );
+
+    if (!integration || !integration.isActive) {
+      throw new BadRequestException('Zoom integration not found or inactive');
     }
 
-    return allMeetings.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    try {
+      const meetings = await this.getZoomMeetings(integration.accessToken);
+      
+      for (const meeting of meetings) {
+        await this.integrationRepository.upsertVideoMeeting({
+          userId,
+          integrationId: integration.id,
+          externalId: meeting.id,
+          title: meeting.title,
+          startTime: meeting.startTime,
+          duration: meeting.duration,
+          joinUrl: meeting.joinUrl,
+          hostId: meeting.hostId,
+          platform: meeting.platform,
+          isRecorded: meeting.isRecorded,
+          participants: meeting.participants,
+          isInterviewRelated: this.isInterviewMeeting(meeting),
+        });
+      }
+
+      await this.integrationRepository.updateLastSync(
+        userId,
+        IntegrationType.ZOOM,
+        { meetingsCount: meetings.length, lastSyncedAt: new Date() },
+      );
+
+      this.logger.log(`Successfully synced ${meetings.length} Zoom meetings for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync Zoom meetings for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async syncTeamsMeetings(userId: string): Promise<void> {
+    const integration = await this.integrationRepository.findIntegrationByUserAndType(
+      userId,
+      IntegrationType.TEAMS,
+    );
+
+    if (!integration || !integration.isActive) {
+      throw new BadRequestException('Teams integration not found or inactive');
+    }
+
+    try {
+      const meetings = await this.getTeamsMeetings(integration.accessToken);
+      
+      for (const meeting of meetings) {
+        await this.integrationRepository.upsertVideoMeeting({
+          userId,
+          integrationId: integration.id,
+          externalId: meeting.id,
+          title: meeting.title,
+          startTime: meeting.startTime,
+          duration: meeting.duration,
+          joinUrl: meeting.joinUrl,
+          hostId: meeting.hostId,
+          platform: meeting.platform,
+          participants: meeting.participants,
+          isInterviewRelated: this.isInterviewMeeting(meeting),
+        });
+      }
+
+      await this.integrationRepository.updateLastSync(
+        userId,
+        IntegrationType.TEAMS,
+        { meetingsCount: meetings.length, lastSyncedAt: new Date() },
+      );
+
+      this.logger.log(`Successfully synced ${meetings.length} Teams meetings for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync Teams meetings for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async syncGoogleMeetMeetings(userId: string): Promise<void> {
+    const integration = await this.integrationRepository.findIntegrationByUserAndType(
+      userId,
+      IntegrationType.GOOGLE_MEET,
+    );
+
+    if (!integration || !integration.isActive) {
+      throw new BadRequestException('Google Meet integration not found or inactive');
+    }
+
+    try {
+      const meetings = await this.getMeetMeetings(integration.accessToken);
+      
+      for (const meeting of meetings) {
+        await this.integrationRepository.upsertVideoMeeting({
+          userId,
+          integrationId: integration.id,
+          externalId: meeting.id,
+          title: meeting.title,
+          startTime: meeting.startTime,
+          duration: meeting.duration,
+          joinUrl: meeting.joinUrl,
+          hostId: meeting.hostId,
+          platform: meeting.platform,
+          participants: meeting.participants,
+          isInterviewRelated: this.isInterviewMeeting(meeting),
+        });
+      }
+
+      await this.integrationRepository.updateLastSync(
+        userId,
+        IntegrationType.GOOGLE_MEET,
+        { meetingsCount: meetings.length, lastSyncedAt: new Date() },
+      );
+
+      this.logger.log(`Successfully synced ${meetings.length} Google Meet meetings for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync Google Meet meetings for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  // Utility methods for detecting interview context
+  async detectInterviewMeetings(userId: string): Promise<any[]> {
+    return this.integrationRepository.findUpcomingVideoInterviews(userId);
+  }
+
+  async getVideoMeetings(
+    userId: string,
+    startTime?: Date,
+    endTime?: Date,
+    interviewOnly?: boolean,
+  ): Promise<any[]> {
+    return this.integrationRepository.findVideoMeetings(
+      userId,
+      startTime,
+      endTime,
+      interviewOnly,
+    );
+  }
+
+  async disconnectPlatform(userId: string, platform: 'zoom' | 'teams' | 'meet'): Promise<void> {
+    let integrationType: IntegrationType;
+    
+    switch (platform) {
+      case 'zoom':
+        integrationType = IntegrationType.ZOOM;
+        break;
+      case 'teams':
+        integrationType = IntegrationType.TEAMS;
+        break;
+      case 'meet':
+        integrationType = IntegrationType.GOOGLE_MEET;
+        break;
+      default:
+        throw new BadRequestException('Invalid platform');
+    }
+
+    try {
+      const integration = await this.integrationRepository.findIntegrationByUserAndType(
+        userId,
+        integrationType,
+      );
+
+      if (integration) {
+        // Delete associated video meetings
+        await this.integrationRepository.deleteVideoMeetingsByIntegration(integration.id);
+        
+        // Deactivate integration
+        await this.integrationRepository.deactivateIntegration(userId, integrationType);
+      }
+
+      this.logger.log(`Successfully disconnected ${platform} for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to disconnect ${platform} for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async getVideoConferencingStatus(userId: string): Promise<any> {
+    const [zoomIntegration, teamsIntegration, meetIntegration] = await Promise.all([
+      this.integrationRepository.findIntegrationByUserAndType(userId, IntegrationType.ZOOM),
+      this.integrationRepository.findIntegrationByUserAndType(userId, IntegrationType.TEAMS),
+      this.integrationRepository.findIntegrationByUserAndType(userId, IntegrationType.GOOGLE_MEET),
+    ]);
+
+    return {
+      zoom: {
+        connected: zoomIntegration?.isActive || false,
+        lastSync: zoomIntegration?.lastSync,
+        syncData: zoomIntegration?.syncData,
+      },
+      teams: {
+        connected: teamsIntegration?.isActive || false,
+        lastSync: teamsIntegration?.lastSync,
+        syncData: teamsIntegration?.syncData,
+      },
+      meet: {
+        connected: meetIntegration?.isActive || false,
+        lastSync: meetIntegration?.lastSync,
+        syncData: meetIntegration?.syncData,
+      },
+    };
   }
 
   async getMeetingContext(meetingId: string, platform: string): Promise<any> {
@@ -337,7 +598,44 @@ export class VideoConferencingService {
   }
 
   private async getUserVideoIntegrations(userId: string): Promise<PlatformIntegration[]> {
-    // This would fetch from database - returning empty array for now
-    return [];
+    const integrations = await this.integrationRepository.findUserIntegrations(userId);
+    
+    return integrations
+      .filter(integration => 
+        integration.integrationType === IntegrationType.ZOOM ||
+        integration.integrationType === IntegrationType.TEAMS ||
+        integration.integrationType === IntegrationType.GOOGLE_MEET
+      )
+      .map(integration => ({
+        platform: this.mapIntegrationTypeToPlatform(integration.integrationType),
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+        accountId: integration.providerUserId,
+      }));
+  }
+
+  private mapIntegrationTypeToPlatform(type: IntegrationType): 'zoom' | 'teams' | 'meet' {
+    switch (type) {
+      case IntegrationType.ZOOM:
+        return 'zoom';
+      case IntegrationType.TEAMS:
+        return 'teams';
+      case IntegrationType.GOOGLE_MEET:
+        return 'meet';
+      default:
+        throw new Error(`Unsupported integration type: ${type}`);
+    }
+  }
+
+  private async exchangeGoogleCodeForToken(code: string): Promise<PlatformIntegration> {
+    // This would be similar to the Google Calendar token exchange
+    // For now, returning a mock structure
+    return {
+      platform: 'meet',
+      accessToken: 'mock_token',
+      refreshToken: 'mock_refresh_token',
+      expiresAt: new Date(Date.now() + 3600 * 1000),
+    };
   }
 }

@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
+
+// Main Integration Controller
+import { IntegrationsController } from './integrations.controller';
 
 // LinkedIn Integration
 import { LinkedInService } from './linkedin/linkedin.service';
@@ -22,10 +26,15 @@ import { DataExportController } from './data-export/data-export.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { WebhookController } from './webhooks/webhook.controller';
 
+// Repository and Services
+import { IntegrationRepository } from './repositories/integration.repository';
+import { IntegrationManagerService } from './services/integration-manager.service';
+
 // Import other required modules
 import { ContextAnalysisModule } from '../context-analysis/context-analysis.module';
 import { InterviewSessionModule } from '../interview-session/interview-session.module';
 import { UserModule } from '../user/user.module';
+import { PrismaModule } from '../../config/prisma.module';
 
 @Module({
   imports: [
@@ -34,11 +43,14 @@ import { UserModule } from '../user/user.module';
       maxRedirects: 5,
     }),
     ConfigModule,
+    ScheduleModule.forRoot(),
+    PrismaModule,
     ContextAnalysisModule,
     InterviewSessionModule,
     UserModule,
   ],
   controllers: [
+    IntegrationsController,
     LinkedInController,
     CalendarController,
     VideoConferencingController,
@@ -46,6 +58,8 @@ import { UserModule } from '../user/user.module';
     WebhookController,
   ],
   providers: [
+    IntegrationRepository,
+    IntegrationManagerService,
     LinkedInService,
     CalendarService,
     VideoConferencingService,
@@ -53,6 +67,8 @@ import { UserModule } from '../user/user.module';
     WebhookService,
   ],
   exports: [
+    IntegrationRepository,
+    IntegrationManagerService,
     LinkedInService,
     CalendarService,
     VideoConferencingService,

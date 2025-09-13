@@ -2,6 +2,8 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { IntegrationType } from '@prisma/client';
+import { IntegrationRepository } from '../repositories/integration.repository';
 
 export interface CalendarEvent {
   id: string;
@@ -31,6 +33,7 @@ export class CalendarService {
   constructor(
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
+    private readonly integrationRepository: IntegrationRepository,
   ) {}
 
   // Google Calendar Integration
@@ -188,28 +191,209 @@ export class CalendarService {
     }
   }
 
-  async getUpcomingInterviews(userId: string): Promise<CalendarEvent[]> {
-    // This would fetch user's calendar integrations from database
-    // For now, returning mock data structure
-    const integrations = await this.getUserCalendarIntegrations(userId);
-    const allEvents: CalendarEvent[] = [];
-
-    for (const integration of integrations) {
-      let events: CalendarEvent[] = [];
+  // Google Calendar Integration Methods
+  async connectGoogleCalendar(userId: string, code: string): Promise<void> {
+    try {
+      const integration = await this.exchangeGoogleCodeForToken(code);
       
-      if (integration.provider === 'google') {
-        events = await this.getGoogleCalendarEvents(integration.accessToken);
-      } else if (integration.provider === 'outlook') {
-        events = await this.getOutlookCalendarEvents(integration.accessToken);
-      }
+      await this.integrationRepository.createIntegration({
+        userId,
+        integrationType: IntegrationType.GOOGLE_CALENDAR,
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+      });
 
-      // Filter for interview-related events
-      const interviewEvents = events.filter(event => event.isInterviewRelated);
-      allEvents.push(...interviewEvents);
+      // Initial sync
+      await this.syncGoogleCalendarEvents(userId);
+
+      this.logger.log(`Successfully connected Google Calendar for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to connect Google Calendar for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async connectOutlookCalendar(userId: string, code: string): Promise<void> {
+    try {
+      const integration = await this.exchangeOutlookCodeForToken(code);
+      
+      await this.integrationRepository.createIntegration({
+        userId,
+        integrationType: IntegrationType.OUTLOOK_CALENDAR,
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+        scopes: ['https://graph.microsoft.com/calendars.read'],
+      });
+
+      // Initial sync
+      await this.syncOutlookCalendarEvents(userId);
+
+      this.logger.log(`Successfully connected Outlook Calendar for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to connect Outlook Calendar for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async syncGoogleCalendarEvents(userId: string): Promise<void> {
+    const integration = await this.integrationRepository.findIntegrationByUserAndType(
+      userId,
+      IntegrationType.GOOGLE_CALENDAR,
+    );
+
+    if (!integration || !integration.isActive) {
+      throw new BadRequestException('Google Calendar integration not found or inactive');
     }
 
-    // Sort by start time
-    return allEvents.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    try {
+      const events = await this.getGoogleCalendarEvents(integration.accessToken);
+      
+      for (const event of events) {
+        await this.integrationRepository.upsertCalendarEvent({
+          userId,
+          integrationId: integration.id,
+          externalId: event.id,
+          title: event.title,
+          description: event.description,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          attendees: event.attendees,
+          location: event.location,
+          meetingUrl: event.meetingUrl,
+          isInterviewRelated: event.isInterviewRelated,
+          companyName: event.companyName,
+          jobTitle: event.jobTitle,
+        });
+      }
+
+      await this.integrationRepository.updateLastSync(
+        userId,
+        IntegrationType.GOOGLE_CALENDAR,
+        { eventsCount: events.length, lastSyncedAt: new Date() },
+      );
+
+      this.logger.log(`Successfully synced ${events.length} Google Calendar events for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync Google Calendar events for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async syncOutlookCalendarEvents(userId: string): Promise<void> {
+    const integration = await this.integrationRepository.findIntegrationByUserAndType(
+      userId,
+      IntegrationType.OUTLOOK_CALENDAR,
+    );
+
+    if (!integration || !integration.isActive) {
+      throw new BadRequestException('Outlook Calendar integration not found or inactive');
+    }
+
+    try {
+      const events = await this.getOutlookCalendarEvents(integration.accessToken);
+      
+      for (const event of events) {
+        await this.integrationRepository.upsertCalendarEvent({
+          userId,
+          integrationId: integration.id,
+          externalId: event.id,
+          title: event.title,
+          description: event.description,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          attendees: event.attendees,
+          location: event.location,
+          meetingUrl: event.meetingUrl,
+          isInterviewRelated: event.isInterviewRelated,
+          companyName: event.companyName,
+          jobTitle: event.jobTitle,
+        });
+      }
+
+      await this.integrationRepository.updateLastSync(
+        userId,
+        IntegrationType.OUTLOOK_CALENDAR,
+        { eventsCount: events.length, lastSyncedAt: new Date() },
+      );
+
+      this.logger.log(`Successfully synced ${events.length} Outlook Calendar events for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync Outlook Calendar events for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async getUpcomingInterviews(userId: string): Promise<any[]> {
+    return this.integrationRepository.findUpcomingInterviews(userId);
+  }
+
+  async getCalendarEvents(
+    userId: string,
+    startTime?: Date,
+    endTime?: Date,
+    interviewOnly?: boolean,
+  ): Promise<any[]> {
+    return this.integrationRepository.findCalendarEvents(
+      userId,
+      startTime,
+      endTime,
+      interviewOnly,
+    );
+  }
+
+  async disconnectCalendar(userId: string, provider: 'google' | 'outlook'): Promise<void> {
+    const integrationType = provider === 'google' 
+      ? IntegrationType.GOOGLE_CALENDAR 
+      : IntegrationType.OUTLOOK_CALENDAR;
+
+    try {
+      const integration = await this.integrationRepository.findIntegrationByUserAndType(
+        userId,
+        integrationType,
+      );
+
+      if (integration) {
+        // Delete associated calendar events
+        await this.integrationRepository.deleteCalendarEventsByIntegration(integration.id);
+        
+        // Deactivate integration
+        await this.integrationRepository.deactivateIntegration(userId, integrationType);
+      }
+
+      this.logger.log(`Successfully disconnected ${provider} calendar for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to disconnect ${provider} calendar for user ${userId}`, error);
+      throw error;
+    }
+  }
+
+  async getCalendarStatus(userId: string): Promise<any> {
+    const [googleIntegration, outlookIntegration] = await Promise.all([
+      this.integrationRepository.findIntegrationByUserAndType(
+        userId,
+        IntegrationType.GOOGLE_CALENDAR,
+      ),
+      this.integrationRepository.findIntegrationByUserAndType(
+        userId,
+        IntegrationType.OUTLOOK_CALENDAR,
+      ),
+    ]);
+
+    return {
+      google: {
+        connected: googleIntegration?.isActive || false,
+        lastSync: googleIntegration?.lastSync,
+        syncData: googleIntegration?.syncData,
+      },
+      outlook: {
+        connected: outlookIntegration?.isActive || false,
+        lastSync: outlookIntegration?.lastSync,
+        syncData: outlookIntegration?.syncData,
+      },
+    };
   }
 
   private mapGoogleEvent(event: any): CalendarEvent {
@@ -294,8 +478,18 @@ export class CalendarService {
   }
 
   private async getUserCalendarIntegrations(userId: string): Promise<CalendarIntegration[]> {
-    // This would fetch from database - returning empty array for now
-    // In real implementation, this would query the user_integrations table
-    return [];
+    const integrations = await this.integrationRepository.findUserIntegrations(userId);
+    
+    return integrations
+      .filter(integration => 
+        integration.integrationType === IntegrationType.GOOGLE_CALENDAR ||
+        integration.integrationType === IntegrationType.OUTLOOK_CALENDAR
+      )
+      .map(integration => ({
+        provider: integration.integrationType === IntegrationType.GOOGLE_CALENDAR ? 'google' : 'outlook',
+        accessToken: integration.accessToken,
+        refreshToken: integration.refreshToken,
+        expiresAt: integration.expiresAt,
+      }));
   }
 }
